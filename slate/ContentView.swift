@@ -6,6 +6,8 @@ struct ContentView: View {
     @State private var vm = InputViewModel()
 
     var body: some View {
+        @Bindable var vm = vm
+
         FeedView()
             .scrollDismissesKeyboard(.interactively)
             .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -19,8 +21,11 @@ struct ContentView: View {
                 }
             }
             .animation(.spring(duration: 0.3), value: vm.toast)
+            .sheet(item: $vm.queryResult) { result in
+                ResultsSheet(result: result)
+            }
             .environment(vm)
-            .task { vm.setup(modelContext: modelContext) }
+            .task { vm.setup(storage: SwiftDataStorageRepository(context: modelContext)) }
     }
 }
 

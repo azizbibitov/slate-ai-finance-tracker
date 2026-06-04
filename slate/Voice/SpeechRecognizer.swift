@@ -3,14 +3,7 @@ import AVFoundation
 
 @Observable
 @MainActor
-final class SpeechRecognizer {
-
-    enum RecordingState: Equatable {
-        case idle
-        case starting
-        case recording
-        case unavailable(String)
-    }
+final class SpeechRecognizer: SpeechRecognizerProtocol {
 
     private(set) var state: RecordingState = .idle
 
@@ -90,10 +83,11 @@ final class SpeechRecognizer {
             print("[Slate] Voice: starting audio session")
             try await beginAudioSession(onPartialResult: onPartialResult)
             print("[Slate] Voice: audio session started (\(Date().timeIntervalSince(t))s)")
-            state = .recording
+            // Guard: stop() may have been called while beginAudioSession was awaiting
+            if case .starting = state { state = .recording }
         } catch {
             print("[Slate] Voice error: \(error)")
-            state = .unavailable("Could not start recording")
+            if case .starting = state { state = .unavailable("Could not start recording") }
         }
     }
 
@@ -141,7 +135,7 @@ final class SpeechRecognizer {
 
         // Audio session setup and engine start are slow — run off main actor
         let currentRecognitionRequest = request
-        try await Task.detached(priority: .userInitiated) {
+        try await Task.detached(priority: .userInitiated) { [generation] in
             #if os(iOS)
             let t2 = Date()
             let session = AVAudioSession.sharedInstance()
@@ -153,7 +147,10 @@ final class SpeechRecognizer {
             let engine = AVAudioEngine()
             let inputNode = engine.inputNode
             let format = inputNode.outputFormat(forBus: 0)
+            let engineStartTime = Date()
             inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in
+                // Skip first 300ms — hardware may deliver buffered audio from the previous session
+                guard Date().timeIntervalSince(engineStartTime) > 0.3 else { return }
                 currentRecognitionRequest.append(buffer)
             }
             engine.prepare()
@@ -162,6 +159,16 @@ final class SpeechRecognizer {
             print("[Slate] Voice: engine.start() done")
 
             await MainActor.run {
+                // stop() may have been called while the engine was starting on the background thread.
+                // If so, audioEngine is still nil and stop() never cleaned it up — do it here instead.
+                guard self.sessionGeneration == generation else {
+                    engine.inputNode.removeTap(onBus: 0)
+                    engine.stop()
+                    #if os(iOS)
+                    try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+                    #endif
+                    return
+                }
                 self.audioEngine = engine
             }
         }.value

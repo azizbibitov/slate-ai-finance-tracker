@@ -2,7 +2,6 @@ import SwiftUI
 
 struct InputBarView: View {
     @Environment(InputViewModel.self) private var vm
-    @Environment(\.modelContext) private var modelContext
 
     var body: some View {
         @Bindable var vm = vm
@@ -30,10 +29,10 @@ struct InputBarView: View {
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
                     .background(.quaternary, in: RoundedRectangle(cornerRadius: 20))
-                    .onSubmit { Task { await vm.submit(modelContext: modelContext) } }
+                    .onSubmit { Task { await vm.submit() } }
 
                 Button {
-                    Task { await vm.submit(modelContext: modelContext) }
+                    Task { await vm.submit() }
                 } label: {
                     Image(systemName: vm.isProcessing ? "ellipsis" : "arrow.up.circle.fill")
                         .font(.system(size: 32))
@@ -49,7 +48,7 @@ struct InputBarView: View {
 }
 
 private struct MicButton: View {
-    let speechRecognizer: SpeechRecognizer
+    let speechRecognizer: any SpeechRecognizerProtocol
     let onStart: () -> Void
     let onTranscript: (String) -> Void
 
@@ -82,15 +81,15 @@ private struct MicButton: View {
 
     private var icon: String {
         switch speechRecognizer.state {
-        case .recording:            return "stop.circle.fill"
-        case .unavailable:          return "mic.slash"
-        case .idle, .starting:      return "mic"
+        case .recording:           return "stop.circle.fill"
+        case .unavailable:         return "mic.slash"
+        case .idle, .starting:     return "mic"
         }
     }
 
     private var color: Color {
         switch speechRecognizer.state {
-        case .recording:                        return .red
+        case .recording:                       return .red
         case .unavailable, .idle, .starting:   return .secondary
         }
     }

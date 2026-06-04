@@ -45,16 +45,9 @@ final class GeminiInputParser: InputParserProtocol {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
         let body: [String: Any] = [
-            "system_instruction": [
-                "parts": [["text": systemPrompt]]
-            ],
-            "contents": [
-                ["parts": [["text": input]]]
-            ],
-            "generationConfig": [
-                "temperature": 0,
-                "maxOutputTokens": 200
-            ]
+            "system_instruction": ["parts": [["text": systemPrompt]]],
+            "contents": [["parts": [["text": input]]]],
+            "generationConfig": ["temperature": 0, "maxOutputTokens": 200]
         ]
 
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
@@ -64,7 +57,7 @@ final class GeminiInputParser: InputParserProtocol {
         guard let http = response as? HTTPURLResponse else { throw ParserError.apiError }
         guard http.statusCode == 200 else {
             let body = String(data: data, encoding: .utf8) ?? "(no body)"
-            print("[Slate] Gemini API error \(http.statusCode): \(body)")
+            print("[Slate] Gemini error \(http.statusCode): \(body)")
             throw ParserError.apiError
         }
 

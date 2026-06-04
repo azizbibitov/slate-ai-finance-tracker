@@ -3,7 +3,6 @@ import SwiftUI
 struct PendingRowView: View {
     let pending: PendingInput
     @Environment(InputViewModel.self) private var vm
-    @Environment(\.modelContext) private var modelContext
 
     var body: some View {
         HStack(spacing: 12) {
@@ -26,7 +25,7 @@ struct PendingRowView: View {
 
             if pending.status == .failed {
                 Button("Retry") {
-                    Task { await vm.retryFailed(pending, modelContext: modelContext) }
+                    Task { await vm.retryFailed(pending) }
                 }
                 .font(.caption)
                 .buttonStyle(.bordered)

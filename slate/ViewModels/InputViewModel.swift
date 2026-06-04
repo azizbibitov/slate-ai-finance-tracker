@@ -1,4 +1,3 @@
-import SwiftData
 import Foundation
 
 struct ToastMessage: Equatable {
@@ -13,40 +12,36 @@ final class InputViewModel {
     var isProcessing = false
     var toast: ToastMessage?
     var errorMessage: String?
+    var queryResult: QueryResult?
 
     let networkMonitor: NetworkMonitor
-    let speechRecognizer: SpeechRecognizer
+    let speechRecognizer: any SpeechRecognizerProtocol
     private let parser: any InputParserProtocol
+    private var storage: (any StorageRepository)?
     private var queueProcessor: QueueProcessor?
 
     init() {
-        print("[Slate] InputViewModel.init start — thread: \(Thread.isMainThread ? "main" : "bg")")
-        let t = Date()
         networkMonitor = NetworkMonitor()
-        print("[Slate] NetworkMonitor created: \(Date().timeIntervalSince(t))s")
         speechRecognizer = SpeechRecognizer()
-        print("[Slate] SpeechRecognizer created: \(Date().timeIntervalSince(t))s")
         parser = ParserFactory.make()
-        print("[Slate] Parser created: \(Date().timeIntervalSince(t))s")
-        print("[Slate] InputViewModel.init done")
     }
 
-    func setup(modelContext: ModelContext) {
-        print("[Slate] setup() called")
+    func setup(storage: any StorageRepository) {
         guard queueProcessor == nil else { return }
-        let processor = QueueProcessor(parser: parser, modelContext: modelContext)
+        self.storage = storage
+        let processor = QueueProcessor(parser: parser, storage: storage)
         queueProcessor = processor
         networkMonitor.onConnectionRestored = { [weak processor] in
             Task { await processor?.flushQueue() }
         }
-        print("[Slate] setup() done")
     }
 
-    func submit(modelContext: ModelContext) async {
+    func submit() async {
+        guard let storage else { return }
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !isProcessing else { return }
-        speechRecognizer.stop()
 
+        speechRecognizer.stop()
         errorMessage = nil
         isProcessing = true
         defer { isProcessing = false }
@@ -59,15 +54,16 @@ final class InputViewModel {
                 let parsed = try await parser.parse(input: text)
                 print("[Slate] Parsed: intent=\(parsed.intent), amount=\(String(describing: parsed.amount)), currency=\(String(describing: parsed.currency)), desc=\(String(describing: parsed.description))")
                 if let tx = makeTransaction(from: parsed, raw: text) {
-                    modelContext.insert(tx)
-                    try? modelContext.save()
+                    storage.insertTransaction(tx)
+                    try? storage.save()
                     inputText = ""
                     let sign = tx.amount >= 0 ? "+" : ""
                     print("[Slate] Saved transaction: \(sign)\(formatAmount(tx.amount)) \(tx.currency) · \(tx.desc)")
                     showToast("\(sign)\(formatAmount(tx.amount)) \(tx.currency) · \(tx.desc)")
                 } else if parsed.intent == .query {
+                    let allTransactions = storage.fetchAllTransactions()
+                    queryResult = QueryFilter.run(query: parsed, transactions: allTransactions, originalText: text)
                     inputText = ""
-                    showToast("Query support coming soon")
                 } else {
                     print("[Slate] Parse result not actionable")
                     errorMessage = "Didn't understand — try: -50 tmt taxi"
@@ -79,17 +75,17 @@ final class InputViewModel {
         } else {
             print("[Slate] Offline — queuing input")
             let pending = PendingInput(rawText: text)
-            modelContext.insert(pending)
-            try? modelContext.save()
+            storage.insertPending(pending)
+            try? storage.save()
             inputText = ""
             showToast("Saved — will process when back online")
         }
     }
 
-    func retryFailed(_ item: PendingInput, modelContext: ModelContext) async {
+    func retryFailed(_ item: PendingInput) async {
         item.status = .pending
         item.retryCount = 0
-        try? modelContext.save()
+        try? storage?.save()
         await queueProcessor?.flushQueue()
     }
 

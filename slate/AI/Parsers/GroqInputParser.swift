@@ -60,7 +60,7 @@ final class GroqInputParser: InputParserProtocol {
         guard let http = response as? HTTPURLResponse else { throw ParserError.apiError }
         guard http.statusCode == 200 else {
             let body = String(data: data, encoding: .utf8) ?? "(no body)"
-            print("[Slate] Groq API error \(http.statusCode): \(body)")
+            print("[Slate] Groq error \(http.statusCode): \(body)")
             throw ParserError.apiError
         }
 
@@ -74,15 +74,12 @@ final class GroqInputParser: InputParserProtocol {
             .replacingOccurrences(of: "```json", with: "")
             .replacingOccurrences(of: "```", with: "")
 
-        // The model sometimes emits two JSON objects for compound inputs — take only the first.
         let cleaned = Self.firstJSONObject(in: stripped) ?? stripped
 
         guard let jsonData = cleaned.data(using: .utf8) else { throw ParserError.decodingFailed }
         return try JSONDecoder().decode(ParsedInput.self, from: jsonData)
     }
-}
 
-extension GroqInputParser {
     // Scan for the first balanced { } block so stray trailing objects are ignored.
     static func firstJSONObject(in text: String) -> String? {
         var depth = 0

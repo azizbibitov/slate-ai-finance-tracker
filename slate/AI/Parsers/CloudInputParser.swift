@@ -56,16 +56,14 @@ final class CloudInputParser: InputParserProtocol {
 
         let (data, response) = try await URLSession.shared.data(for: request)
 
-        guard let http = response as? HTTPURLResponse else {
-            throw ParserError.apiError
-        }
+        guard let http = response as? HTTPURLResponse else { throw ParserError.apiError }
         guard http.statusCode == 200 else {
             let body = String(data: data, encoding: .utf8) ?? "(no body)"
-            print("[Slate] API error \(http.statusCode): \(body)")
+            print("[Slate] OpenAI error \(http.statusCode): \(body)")
             throw ParserError.apiError
         }
 
-        let json = try JSONDecoder().decode(OpenAIResponse.self, from: data)
+        let json = try JSONDecoder().decode(OpenAICompatibleResponse.self, from: data)
         guard let content = json.choices.first?.message.content else {
             throw ParserError.emptyResponse
         }
@@ -75,22 +73,12 @@ final class CloudInputParser: InputParserProtocol {
             .replacingOccurrences(of: "```json", with: "")
             .replacingOccurrences(of: "```", with: "")
 
-        guard let jsonData = cleaned.data(using: .utf8) else {
-            throw ParserError.decodingFailed
-        }
-
+        guard let jsonData = cleaned.data(using: .utf8) else { throw ParserError.decodingFailed }
         return try JSONDecoder().decode(ParsedInput.self, from: jsonData)
     }
 }
 
-enum ParserError: Error {
-    case apiError
-    case emptyResponse
-    case decodingFailed
-    case notUnderstood
-}
-
-private struct OpenAIResponse: Codable {
+private struct OpenAICompatibleResponse: Codable {
     struct Choice: Codable {
         struct Message: Codable { let content: String }
         let message: Message
