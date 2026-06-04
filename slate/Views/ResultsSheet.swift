@@ -6,45 +6,80 @@ struct ResultsSheet: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                summaryHeader
-                Divider()
+            List {
+                Section {
+                    summaryCard
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                        .listRowInsets(EdgeInsets(top: 12, leading: 20, bottom: 12, trailing: 20))
+                }
+
                 if result.transactions.isEmpty {
-                    emptyState
-                } else {
-                    List(result.transactions) { tx in
-                        TransactionRowView(transaction: tx)
+                    Section {
+                        emptyState
+                            .listRowBackground(Color.clear)
                             .listRowSeparator(.hidden)
                     }
-                    .listStyle(.plain)
+                } else {
+                    Section {
+                        ForEach(result.transactions) { tx in
+                            TransactionRowView(transaction: tx)
+                                .listRowSeparator(.hidden)
+                                .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
+                        }
+                    } header: {
+                        Text("TRANSACTIONS")
+                            .font(.system(size: 11, weight: .semibold, design: .rounded))
+                            .foregroundStyle(.tertiary)
+                            .padding(.horizontal, 20)
+                            .padding(.vertical, 6)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                 }
             }
+            .listStyle(.plain)
             .navigationTitle("Results")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
+                        .foregroundStyle(Color.brand)
                 }
             }
         }
     }
 
-    private var summaryHeader: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(result.originalQuery)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(2)
+    private var summaryCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 6) {
+                Image(systemName: "sparkles")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Color.brand)
+                Text(result.originalQuery)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+
+            Divider()
 
             if result.totalsByCurrency.isEmpty {
-                Text("No transactions")
-                    .font(.title2.weight(.semibold))
+                Text("No transactions found")
+                    .font(.system(.title2, design: .rounded).weight(.bold))
                     .foregroundStyle(.secondary)
             } else {
-                ForEach(result.totalsByCurrency, id: \.currency) { item in
-                    Text(formatTotal(item.total) + " " + item.currency)
-                        .font(.title2.monospacedDigit().weight(.semibold))
-                        .foregroundStyle(item.total >= 0 ? Color.green : Color.primary)
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(result.totalsByCurrency, id: \.currency) { item in
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            Text(CurrencyFormatter.format(item.total, showSign: true))
+                                .font(.system(size: 38, weight: .bold, design: .rounded).monospacedDigit())
+                                .foregroundStyle(item.total >= 0 ? Color.brand : Color.primary)
+                            Text(item.currency)
+                                .font(.system(size: 16, weight: .semibold, design: .rounded))
+                                .foregroundStyle(.secondary)
+                                .padding(.bottom, 3)
+                        }
+                    }
                 }
             }
 
@@ -52,21 +87,23 @@ struct ResultsSheet: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 14)
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var emptyState: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 12) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 32, weight: .light))
+                .foregroundStyle(.tertiary)
             Text("No matching transactions")
-                .font(.headline)
+                .font(.system(.headline, design: .rounded))
                 .foregroundStyle(.secondary)
             Text("Try a different period or category")
                 .font(.subheadline)
                 .foregroundStyle(.tertiary)
+                .multilineTextAlignment(.center)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 48)
     }
 
     private var periodLabel: String {
@@ -77,12 +114,5 @@ struct ResultsSheet: View {
         case .year:  return "this year"
         case .all:   return "all time"
         }
-    }
-
-    private func formatTotal(_ amount: Double) -> String {
-        let abs = Swift.abs(amount)
-        let sign = amount >= 0 ? "+" : "-"
-        let formatted = abs == abs.rounded() ? "\(Int(abs))" : String(format: "%.2f", abs)
-        return sign + formatted
     }
 }

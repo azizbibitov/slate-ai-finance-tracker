@@ -46,34 +46,26 @@ final class InputViewModel {
         isProcessing = true
         defer { isProcessing = false }
 
-        print("[Slate] Submit: \"\(text)\" | connected: \(networkMonitor.isConnected)")
-
         if networkMonitor.isConnected {
             do {
-                print("[Slate] Parsing via cloud...")
                 let parsed = try await parser.parse(input: text)
-                print("[Slate] Parsed: intent=\(parsed.intent), amount=\(String(describing: parsed.amount)), currency=\(String(describing: parsed.currency)), desc=\(String(describing: parsed.description))")
                 if let tx = makeTransaction(from: parsed, raw: text) {
                     storage.insertTransaction(tx)
                     try? storage.save()
                     inputText = ""
-                    let sign = tx.amount >= 0 ? "+" : ""
-                    print("[Slate] Saved transaction: \(sign)\(formatAmount(tx.amount)) \(tx.currency) · \(tx.desc)")
-                    showToast("\(sign)\(formatAmount(tx.amount)) \(tx.currency) · \(tx.desc)")
+                    let amountStr = CurrencyFormatter.format(tx.amount, showSign: true)
+                    showToast("\(amountStr) \(tx.currency) · \(tx.desc)")
                 } else if parsed.intent == .query {
                     let allTransactions = storage.fetchAllTransactions()
                     queryResult = QueryFilter.run(query: parsed, transactions: allTransactions, originalText: text)
                     inputText = ""
                 } else {
-                    print("[Slate] Parse result not actionable")
                     errorMessage = "Didn't understand — try: -50 tmt taxi"
                 }
             } catch {
-                print("[Slate] Parse error: \(error)")
                 errorMessage = "Didn't understand — try: -50 tmt taxi"
             }
         } else {
-            print("[Slate] Offline — queuing input")
             let pending = PendingInput(rawText: text)
             storage.insertPending(pending)
             try? storage.save()
@@ -100,21 +92,14 @@ final class InputViewModel {
     private func makeTransaction(from parsed: ParsedInput, raw: String) -> Transaction? {
         guard parsed.intent == .transaction,
               let amount = parsed.amount,
-              let currency = parsed.currency,
-              let description = parsed.description else { return nil }
+              let currency = parsed.currency else { return nil }
         return Transaction(
             amount: amount,
             currency: currency,
-            desc: description,
+            desc: parsed.description ?? (amount >= 0 ? "income" : "expense"),
             category: parsed.category ?? .other,
             rawInput: raw
         )
     }
 
-    private func formatAmount(_ amount: Double) -> String {
-        if amount == amount.rounded() {
-            return String(Int(amount))
-        }
-        return String(format: "%.2f", amount)
-    }
 }

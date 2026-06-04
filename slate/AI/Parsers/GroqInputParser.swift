@@ -26,15 +26,42 @@ final class GroqInputParser: InputParserProtocol {
       "queryPeriod": "today" | "week" | "month" | "year" | "all" | null
     }
 
-    Rules:
-    - "bought", "spent", "paid", "cost" → negative amount (expense)
-    - "received", "salary", "earned", "got paid" → positive amount (income)
-    - If sign is ambiguous and no income word present → treat as expense
-    - "show", "see", "how much", "list", "display" → query intent
+    Amount sign rules:
+    - Expense (negative): bought, spent, paid, cost, purchase, ordered, subscribed, charged
+    - Income (positive): received, got, earned, salary, income, profit, refund, gave me, sent me, transferred to me, from [person/source]
+    - Ambiguous with no income signal → treat as expense
+
+    Description rules:
+    - Always set a short English description (1-3 words). NEVER return null for description on a transaction.
+    - Use the item/purpose: "taxi", "salary", "coffee", "from mom"
+    - If no clear item, use the person/source: "from mother", "from friend"
+    - Last resort fallback: "income" for positive, "expense" for negative
+
+    Currency rules:
+    - $ or USD → "USD"
+    - € or EUR → "EUR"
+    - £ or GBP → "GBP"
+    - ₽ or rub → "RUB"
+    - tmt, manat, m → "TMT"
+    - Default to TMT if no currency mentioned
+
+    Category rules:
+    - transfer: ONLY when moving between user's own accounts/wallets ("moved to savings", "topped up card")
+    - salary: regular paycheck or wage
+    - other: gifts, money from family/friends, any income where source is a person
+    - Never use transfer just because a person is the source of income
+
+    Query rules:
+    - "show", "see", "how much", "list", "display", "what did I", "total" → query intent
     - Default queryPeriod to "month" if not specified
-    - User may write in English, Russian, or Turkmen — parse correctly regardless
-    - Default currency to TMT if not specified
-    - Return null for fields you cannot determine
+
+    Language: user may write in English, Russian, or Turkmen — parse correctly regardless.
+
+    Examples:
+    "i received 200$ from my mother" → {"intent":"transaction","amount":200,"currency":"USD","description":"from mother","category":"other",...}
+    "spent 50 tmt on taxi" → {"intent":"transaction","amount":-50,"currency":"TMT","description":"taxi","category":"transport",...}
+    "salary 3000" → {"intent":"transaction","amount":3000,"currency":"TMT","description":"salary","category":"salary",...}
+    "show food expenses this month" → {"intent":"query","queryCategory":"food","queryType":"expense","queryPeriod":"month",...}
     """
 
     func parse(input: String) async throws -> ParsedInput {
@@ -59,8 +86,6 @@ final class GroqInputParser: InputParserProtocol {
 
         guard let http = response as? HTTPURLResponse else { throw ParserError.apiError }
         guard http.statusCode == 200 else {
-            let body = String(data: data, encoding: .utf8) ?? "(no body)"
-            print("[Slate] Groq error \(http.statusCode): \(body)")
             throw ParserError.apiError
         }
 

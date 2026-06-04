@@ -15,12 +15,10 @@ final class SpeechRecognizer: SpeechRecognizerProtocol {
 
     func toggle(onStart: @escaping () -> Void, onPartialResult: @escaping (String) -> Void) {
         if case .recording = state {
-            print("[Slate] Voice: stopping")
             stop()
         } else if case .starting = state {
             // ignore taps while initializing
         } else {
-            print("[Slate] Voice: starting - thread: \(Thread.isMainThread ? "main" : "bg")")
             onStart()
             state = .starting
             Task { await start(onPartialResult: onPartialResult) }
@@ -28,13 +26,9 @@ final class SpeechRecognizer: SpeechRecognizerProtocol {
     }
 
     func stop() {
-        print("[Slate] Voice: stop() — thread: \(Thread.isMainThread ? "main" : "bg")")
         sessionGeneration += 1
-        let t = Date()
         audioEngine?.inputNode.removeTap(onBus: 0)
-        print("[Slate] Voice: removeTap \(Date().timeIntervalSince(t))s")
         audioEngine?.stop()
-        print("[Slate] Voice: audioEngine.stop() \(Date().timeIntervalSince(t))s")
         audioEngine = nil
         recognitionRequest?.endAudio()
         recognitionRequest = nil
@@ -48,31 +42,24 @@ final class SpeechRecognizer: SpeechRecognizerProtocol {
     }
 
     private func start(onPartialResult: @escaping (String) -> Void) async {
-        let t = Date()
-        print("[Slate] Voice: requesting speech auth")
         let speechStatus = await withCheckedContinuation { continuation in
             SFSpeechRecognizer.requestAuthorization { continuation.resume(returning: $0) }
         }
-        print("[Slate] Voice: speech auth done (\(Date().timeIntervalSince(t))s): \(speechStatus.rawValue)")
         guard speechStatus == .authorized else {
             state = .unavailable("Speech recognition permission denied — check Settings")
             return
         }
 
-        print("[Slate] Voice: requesting mic permission")
         let micGranted = await AVAudioApplication.requestRecordPermission()
-        print("[Slate] Voice: mic permission done (\(Date().timeIntervalSince(t))s): \(micGranted)")
         guard micGranted else {
             state = .unavailable("Microphone access needed for voice input")
             return
         }
 
-        // Prefer device locale, fall back to English
         let candidates = [Locale.current, Locale(identifier: "en-US")]
         recognizer = candidates
             .compactMap { SFSpeechRecognizer(locale: $0) }
             .first { $0.isAvailable }
-        print("[Slate] Voice: recognizer ready (\(Date().timeIntervalSince(t))s)")
 
         guard recognizer != nil else {
             state = .unavailable("Voice not available for this language — please type")
@@ -80,13 +67,9 @@ final class SpeechRecognizer: SpeechRecognizerProtocol {
         }
 
         do {
-            print("[Slate] Voice: starting audio session")
             try await beginAudioSession(onPartialResult: onPartialResult)
-            print("[Slate] Voice: audio session started (\(Date().timeIntervalSince(t))s)")
-            // Guard: stop() may have been called while beginAudioSession was awaiting
             if case .starting = state { state = .recording }
         } catch {
-            print("[Slate] Voice error: \(error)")
             if case .starting = state { state = .unavailable("Could not start recording") }
         }
     }
@@ -133,15 +116,12 @@ final class SpeechRecognizer: SpeechRecognizerProtocol {
             }
         }
 
-        // Audio session setup and engine start are slow — run off main actor
         let currentRecognitionRequest = request
         try await Task.detached(priority: .userInitiated) { [generation] in
             #if os(iOS)
-            let t2 = Date()
             let session = AVAudioSession.sharedInstance()
             try session.setCategory(.record, mode: .measurement, options: .duckOthers)
             try session.setActive(true, options: .notifyOthersOnDeactivation)
-            print("[Slate] Voice: AVAudioSession.setActive \(Date().timeIntervalSince(t2))s")
             #endif
 
             let engine = AVAudioEngine()
@@ -154,9 +134,7 @@ final class SpeechRecognizer: SpeechRecognizerProtocol {
                 currentRecognitionRequest.append(buffer)
             }
             engine.prepare()
-            print("[Slate] Voice: engine.prepare() done")
             try engine.start()
-            print("[Slate] Voice: engine.start() done")
 
             await MainActor.run {
                 // stop() may have been called while the engine was starting on the background thread.

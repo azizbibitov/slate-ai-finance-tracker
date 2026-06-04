@@ -1,4 +1,5 @@
 import SwiftData
+import Foundation
 
 @MainActor
 final class SwiftDataStorageRepository: StorageRepository {

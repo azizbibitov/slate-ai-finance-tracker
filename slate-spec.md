@@ -60,37 +60,44 @@ The transaction's date is always when the user entered it — not when it was pa
 
 ## Parsing Architecture — Repository Pattern
 
-The parser is hidden behind a protocol. Today it calls a Cloud API. Later it calls Foundation Models. Nothing else in the app changes.
+The parser is hidden behind `InputParserProtocol`. Today three cloud implementations exist; later a Foundation Models parser slots in without changing anything else.
 
 ```swift
-// Shared/AI/InputParserProtocol.swift
 protocol InputParserProtocol: AnyObject {
     func parse(input: String) async throws -> ParsedInput
 }
 ```
 
 ```
-Today:
+Implemented:
   InputParserProtocol
-    └── CloudInputParser          (OpenAI / Gemini / Anthropic)
+    ├── GroqInputParser       (default — llama-3.1-8b-instant, fastest)
+    ├── CloudInputParser      (OpenAI gpt-4o-mini)
+    └── GeminiInputParser     (Gemini 1.5 Flash)
 
 Later (iOS 26, A17 Pro+):
   InputParserProtocol
-    ├── FoundationModelsParser    (on-device, no network)
-    └── CloudInputParser          (fallback for Russian, older devices)
+    ├── FoundationModelsParser  (on-device, no network)
+    └── GroqInputParser / CloudInputParser  (fallback for Russian, older devices)
 ```
 
-The app uses a factory to resolve the right parser at runtime:
+`ParserFactory.make()` returns `GroqInputParser()` by default. Swap to any other implementation there with no other changes.
+
+### Storage — Repository Pattern
+
+Storage is also behind a protocol so SwiftData is never referenced outside the storage layer:
 
 ```swift
-// Shared/AI/ParserFactory.swift
-enum ParserFactory {
-    static func make() -> InputParserProtocol {
-        // Later: if #available(iOS 26, *), device eligible → FoundationModelsParser
-        return CloudInputParser()
-    }
+@MainActor
+protocol StorageRepository: AnyObject {
+    func insertTransaction(_:), insertPending(_:), deletePending(_:)
+    func save() throws
+    func fetchPending() -> [PendingInput]
+    func fetchAllTransactions() -> [Transaction]
 }
 ```
+
+`SwiftDataStorageRepository` is the only implementation. `InputViewModel` and `QueueProcessor` both depend on the protocol, not on SwiftData directly.
 
 ---
 
@@ -140,65 +147,57 @@ Every input outcome has a clear, non-blocking response. Input is never silently 
 
 ## Project Structure
 
+Current implementation lives entirely in the `slate/` iOS target. watchOS and macOS targets are planned for v2.
+
 ```
-Slate/
-├── Slate.xcodeproj
-│
-├── Shared/                          # Pure Swift — no UIKit/AppKit/WatchKit
-│   ├── Models/
-│   │   ├── Transaction.swift        # SwiftData model
-│   │   ├── PendingInput.swift       # SwiftData model — offline queue
-│   │   └── Category.swift           # Category enum + SF Symbols
-│   ├── AI/
-│   │   ├── InputParserProtocol.swift
-│   │   ├── ParsedInput.swift        # Shared output type (Codable)
-│   │   ├── CloudInputParser.swift   # Cloud API implementation
-│   │   ├── ParserFactory.swift      # Runtime resolution
-│   │   └── QueueProcessor.swift    # Flushes PendingInputs when online
-│   ├── Logic/
-│   │   ├── QueryFilter.swift        # Pure filtering — all platforms
-│   │   └── CurrencyFormatter.swift
-│   └── Connectivity/
-│       └── WatchBridge.swift        # WatchConnectivity shared message types
-│
-├── SlateiOS/
-│   ├── SlateIOSApp.swift
-│   ├── Voice/
-│   │   └── SpeechRecognizer.swift   # SFSpeechRecognizer wrapper
-│   ├── Network/
-│   │   └── NetworkMonitor.swift     # NWPathMonitor wrapper
-│   ├── Views/
-│   │   ├── MainView.swift
-│   │   ├── InputBarView.swift
-│   │   ├── FeedView.swift
-│   │   ├── TransactionRowView.swift
-│   │   ├── PendingRowView.swift     # Shows queued items
-│   │   ├── ResultsSheet.swift
-│   │   ├── OnboardingView.swift     # First launch — dictation download prompt
-│   │   └── ToastView.swift
-│   └── Connectivity/
-│       └── PhoneSessionManager.swift
-│
-├── SlateWatch/
-│   ├── SlateWatchApp.swift
-│   ├── Views/
-│   │   ├── WatchMainView.swift
-│   │   ├── WatchInputView.swift     # WKTextInputController dictation
-│   │   └── WatchFeedView.swift
-│   └── Connectivity/
-│       └── WatchSessionManager.swift
-│
-└── SlateMac/
-    ├── SlateMacApp.swift
-    ├── Voice/
-    │   └── SpeechRecognizer.swift
+slate/
+├── slate.xcodeproj
+└── slate/
+    ├── SlateApp.swift
+    ├── ContentView.swift
+    ├── Secrets.swift                    # gitignored — API keys
+    │
+    ├── AI/
+    │   ├── InputParserProtocol.swift    # protocol + ParserError
+    │   ├── ParsedInput.swift            # shared Codable output type
+    │   ├── ParserFactory.swift          # returns GroqInputParser by default
+    │   ├── QueueProcessor.swift         # flushes PendingInputs when online
+    │   └── Parsers/
+    │       ├── GroqInputParser.swift    # default — llama-3.1-8b-instant
+    │       ├── CloudInputParser.swift   # OpenAI gpt-4o-mini
+    │       └── GeminiInputParser.swift  # Gemini 1.5 Flash
+    │
+    ├── Logic/
+    │   ├── CurrencyFormatter.swift      # single formatting utility
+    │   ├── QueryFilter.swift            # pure filter + aggregate
+    │   └── Theme.swift                  # Color.brand, Color.brandMuted
+    │
+    ├── Models/
+    │   ├── Transaction.swift            # SwiftData model
+    │   ├── PendingInput.swift           # SwiftData model — offline queue
+    │   └── Category.swift               # TransactionCategory enum + SF Symbols
+    │
     ├── Network/
-    │   └── NetworkMonitor.swift
-    └── Views/
-        ├── MacMainView.swift        # NavigationSplitView
-        ├── MacInputView.swift
-        ├── MacFeedView.swift
-        └── MacResultsView.swift
+    │   └── NetworkMonitor.swift         # NWPathMonitor + onConnectionRestored callback
+    │
+    ├── Storage/
+    │   ├── StorageRepository.swift      # protocol
+    │   └── SwiftDataStorageRepository.swift
+    │
+    ├── ViewModels/
+    │   └── InputViewModel.swift         # @Observable — all input/submit logic
+    │
+    ├── Views/
+    │   ├── FeedView.swift               # date-grouped list with balance header
+    │   ├── InputBarView.swift           # mic + text field + send button
+    │   ├── TransactionRowView.swift
+    │   ├── PendingRowView.swift
+    │   ├── ResultsSheet.swift           # query results sheet
+    │   └── ToastView.swift
+    │
+    └── Voice/
+        ├── SpeechRecognizerProtocol.swift  # protocol + RecordingState enum
+        └── SpeechRecognizer.swift           # SFSpeechRecognizer wrapper
 ```
 
 ---
@@ -1409,10 +1408,115 @@ That's it. No other changes anywhere in the app.
 
 ## Out of Scope (v1)
 
-- Charts / spending trends
 - Budget limits or alerts
 - Export (CSV, PDF)
-- Multi-account / wallet support
 - Shortcuts / Siri integration
 - Lock Screen widget / complications
 - Android
+
+---
+
+## Roadmap — v2 Features
+
+### Accounts
+
+Users can have multiple named accounts (Cash, Card, Savings, etc.) in different currencies. Every transaction belongs to an account. Transfers move money between two accounts and appear as a single entry in the feed (not two separate transactions).
+
+**Model additions:**
+
+```swift
+@Model
+final class Account {
+    var id: UUID
+    var name: String       // "Cash", "Kapitalbank", "Savings"
+    var currency: String   // primary currency for this account
+    var emoji: String      // "💵", "🏦", "💳"
+    var sortOrder: Int
+    var isArchived: Bool
+
+    init(name: String, currency: String, emoji: String) { ... }
+}
+```
+
+`Transaction` gains an optional `accountID: UUID?` — nil means "no account" (backwards compatible with existing data).
+
+**Transfer model:**
+
+A transfer is a special transaction pair: one negative on the source account and one positive on the destination account, linked by a shared `transferID: UUID`. The feed shows them as a single row.
+
+```swift
+// Transaction additions
+var transferID: UUID?          // non-nil when part of a transfer pair
+var destinationAccountID: UUID? // non-nil on the positive leg
+```
+
+**Natural language examples:**
+
+- `"transferred 500 tmt from cash to card"` → transfer between accounts
+- `"moved 200$ to savings"` → transfer, source = current default account
+- `"received 200$ from my mother"` → income, no transfer, category = other
+
+**Parser additions to `ParsedInput`:**
+
+```swift
+// Transfer fields (only when intent == .transfer)
+var sourceAccount: String?       // matched against known account names
+var destinationAccount: String?
+```
+
+`Intent` gains a `.transfer` case.
+
+---
+
+### Categories (Enhanced)
+
+Current categories are hardcoded in `TransactionCategory`. In v2, users can create custom categories with a name, SF Symbol, and color. Built-in categories remain but are editable.
+
+**Model:**
+
+```swift
+@Model
+final class Category {
+    var id: UUID
+    var name: String
+    var sfSymbol: String
+    var colorHex: String    // brand/accent color for this category
+    var isBuiltIn: Bool
+    var sortOrder: Int
+}
+```
+
+`Transaction.category` changes from `String` (rawValue) to `UUID` (foreign key to `Category`). A migration is needed.
+
+The parser returns a category name string; the app resolves it to a `Category` by fuzzy-matching on name.
+
+---
+
+### Charts
+
+A dedicated Charts tab (iOS, macOS) showing spending trends over time.
+
+**Views:**
+
+- **Spending by category** — pie/donut chart for the selected period (week, month, year)
+- **Income vs expenses** — bar chart grouped by week or month
+- **Balance over time** — line chart per account or total
+
+**Implementation:** Swift Charts (`import Charts`), iOS 16+.
+
+**Data layer:** `QueryFilter` already handles period filtering. Charts just aggregate the output into `[(label: String, value: Double)]` series.
+
+**Natural language query integration:** "show me a chart of food spending this year" → opens Charts tab filtered to food/year.
+
+---
+
+### Transfer Parser Flow
+
+When the parser returns `intent == .transfer`:
+
+1. `InputViewModel` resolves `sourceAccount` and `destinationAccount` strings to `Account` objects (fuzzy match on name)
+2. Creates two `Transaction` objects with a shared `transferID`
+3. One is negative on the source account, one is positive on the destination
+4. Feed shows them as a single "Transfer" row with → arrow
+
+If account names can't be resolved, fall back to asking the user to clarify (inline prompt below the input bar).

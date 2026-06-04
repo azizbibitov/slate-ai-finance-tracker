@@ -6,46 +6,47 @@ struct InputBarView: View {
     var body: some View {
         @Bindable var vm = vm
 
-        VStack(alignment: .leading, spacing: 4) {
-            if let error = vm.errorMessage {
-                Text(error)
-                    .font(.caption)
-                    .foregroundStyle(.red)
-                    .padding(.horizontal, 16)
-            }
+        VStack(spacing: 0) {
+            Divider()
+                .opacity(0.4)
 
-            HStack(spacing: 10) {
-                MicButton(speechRecognizer: vm.speechRecognizer, onStart: {
-                    vm.inputText = ""
-                }, onTranscript: { transcript in
-                    vm.inputText = transcript
-                })
-
-                TextField("e.g. -50 tmt taxi", text: $vm.inputText, axis: .vertical)
-                    .textFieldStyle(.plain)
-                    .lineLimit(1...4)
-                    .autocorrectionDisabled()
-                    .textInputAutocapitalization(.never)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .background(.quaternary, in: RoundedRectangle(cornerRadius: 20))
-                    .onSubmit { Task { await vm.submit() } }
-
-                Button {
-                    Task { await vm.submit() }
-                } label: {
-                    Image(systemName: vm.isProcessing ? "ellipsis" : "arrow.up.circle.fill")
-                        .font(.system(size: 32))
-                        .foregroundStyle(.blue.opacity(vm.inputText.trimmingCharacters(in: .whitespaces).isEmpty ? 0.3 : 1.0))
+            VStack(alignment: .leading, spacing: 0) {
+                if let error = vm.errorMessage {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .padding(.horizontal, 16)
+                        .padding(.top, 10)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
                 }
-                .disabled(vm.inputText.trimmingCharacters(in: .whitespaces).isEmpty || vm.isProcessing)
+
+                HStack(spacing: 10) {
+                    MicButton(speechRecognizer: vm.speechRecognizer) {
+                        vm.inputText = ""
+                    } onTranscript: { transcript in
+                        vm.inputText = transcript
+                    }
+
+                    TextField("Log a transaction or ask...", text: $vm.inputText, axis: .vertical)
+                        .textFieldStyle(.plain)
+                        .font(.body)
+                        .lineLimit(1...4)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                        .onSubmit { Task { await vm.submit() } }
+
+                    SendButton(vm: vm)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 12)
             }
+            .background(.regularMaterial)
+            .animation(.spring(duration: 0.2), value: vm.errorMessage == nil)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(.regularMaterial)
     }
 }
+
+// MARK: - Mic
 
 private struct MicButton: View {
     let speechRecognizer: any SpeechRecognizerProtocol
@@ -53,44 +54,98 @@ private struct MicButton: View {
     let onTranscript: (String) -> Void
 
     var body: some View {
-        VStack(spacing: 2) {
-            Button {
-                speechRecognizer.toggle(onStart: onStart, onPartialResult: onTranscript)
-            } label: {
-                ZStack {
-                    if case .starting = speechRecognizer.state {
-                        ProgressView()
-                            .frame(width: 36, height: 36)
-                    } else {
-                        Image(systemName: icon)
-                            .font(.system(size: 22, weight: .medium))
-                            .foregroundStyle(color)
-                            .frame(width: 36, height: 36)
-                    }
+        Button {
+            speechRecognizer.toggle(onStart: onStart, onPartialResult: onTranscript)
+        } label: {
+            ZStack {
+                if case .recording = speechRecognizer.state {
+                    PulseRing()
+                }
+                Circle()
+                    .fill(micBackground)
+                    .frame(width: 40, height: 40)
+                if case .starting = speechRecognizer.state {
+                    ProgressView()
+                        .tint(.secondary)
+                        .scaleEffect(0.8)
+                } else {
+                    Image(systemName: micIcon)
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundStyle(micColor)
                 }
             }
-            .disabled(speechRecognizer.state == .starting)
-            if case .unavailable(let msg) = speechRecognizer.state {
-                Text(msg)
-                    .font(.caption2)
-                    .foregroundStyle(.red)
-                    .fixedSize(horizontal: false, vertical: true)
+        }
+        .buttonStyle(.plain)
+        .disabled(speechRecognizer.state == .starting)
+    }
+
+    private var micIcon: String {
+        switch speechRecognizer.state {
+        case .recording:       return "waveform"
+        case .unavailable:     return "mic.slash"
+        default:               return "mic"
+        }
+    }
+
+    private var micColor: Color {
+        if case .recording = speechRecognizer.state { return .red }
+        return .secondary
+    }
+
+    private var micBackground: Color {
+        if case .recording = speechRecognizer.state { return Color.red.opacity(0.10) }
+        return Color(.tertiarySystemBackground)
+    }
+}
+
+private struct PulseRing: View {
+    @State private var scale: CGFloat = 1
+    @State private var opacity: Double = 0.6
+
+    var body: some View {
+        Circle()
+            .stroke(Color.red.opacity(opacity), lineWidth: 2)
+            .frame(width: 52, height: 52)
+            .scaleEffect(scale)
+            .onAppear {
+                withAnimation(.easeOut(duration: 1.2).repeatForever(autoreverses: false)) {
+                    scale = 1.55
+                    opacity = 0
+                }
+            }
+    }
+}
+
+// MARK: - Send
+
+private struct SendButton: View {
+    let vm: InputViewModel
+
+    private var isEmpty: Bool {
+        vm.inputText.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
+    var body: some View {
+        Button {
+            Task { await vm.submit() }
+        } label: {
+            ZStack {
+                Circle()
+                    .fill(isEmpty ? Color(.tertiarySystemBackground) : Color.brand)
+                    .frame(width: 40, height: 40)
+                if vm.isProcessing {
+                    ProgressView()
+                        .tint(.white)
+                        .scaleEffect(0.75)
+                } else {
+                    Image(systemName: vm.networkMonitor.isConnected ? "arrow.up" : "clock.arrow.circlepath")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(isEmpty ? Color(.tertiaryLabel) : .white)
+                }
             }
         }
-    }
-
-    private var icon: String {
-        switch speechRecognizer.state {
-        case .recording:           return "stop.circle.fill"
-        case .unavailable:         return "mic.slash"
-        case .idle, .starting:     return "mic"
-        }
-    }
-
-    private var color: Color {
-        switch speechRecognizer.state {
-        case .recording:                       return .red
-        case .unavailable, .idle, .starting:   return .secondary
-        }
+        .buttonStyle(.plain)
+        .disabled(isEmpty || vm.isProcessing)
+        .animation(.spring(duration: 0.2), value: isEmpty)
     }
 }

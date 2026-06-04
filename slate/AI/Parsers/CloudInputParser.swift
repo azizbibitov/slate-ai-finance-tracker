@@ -58,8 +58,6 @@ final class CloudInputParser: InputParserProtocol {
 
         guard let http = response as? HTTPURLResponse else { throw ParserError.apiError }
         guard http.statusCode == 200 else {
-            let body = String(data: data, encoding: .utf8) ?? "(no body)"
-            print("[Slate] OpenAI error \(http.statusCode): \(body)")
             throw ParserError.apiError
         }
 

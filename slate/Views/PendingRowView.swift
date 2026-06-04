@@ -4,41 +4,52 @@ struct PendingRowView: View {
     let pending: PendingInput
     @Environment(InputViewModel.self) private var vm
 
-    var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: pending.status == .failed ? "exclamationmark.circle" : "clock")
-                .font(.system(size: 16, weight: .medium))
-                .foregroundStyle(pending.status == .failed ? .red : .secondary)
-                .frame(width: 32, height: 32)
-                .background(.quaternary, in: Circle())
+    private var isFailed: Bool { pending.status == .failed }
 
-            VStack(alignment: .leading, spacing: 2) {
+    var body: some View {
+        HStack(spacing: 14) {
+            ZStack {
+                Circle()
+                    .fill(isFailed ? Color.red.opacity(0.10) : Color(.tertiarySystemBackground))
+                    .frame(width: 44, height: 44)
+                Image(systemName: isFailed ? "exclamationmark.circle.fill" : "clock.fill")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundStyle(isFailed ? Color.red : Color.secondary)
+            }
+
+            VStack(alignment: .leading, spacing: 3) {
                 Text(pending.rawText)
-                    .font(.body)
+                    .font(.body.weight(.medium))
                     .foregroundStyle(.secondary)
-                Text(pending.entryDate.formatted(date: .abbreviated, time: .shortened))
+                    .lineLimit(1)
+                Text(pending.entryDate.formatted(.dateTime.hour().minute()))
                     .font(.caption)
                     .foregroundStyle(.tertiary)
             }
 
             Spacer()
 
-            if pending.status == .failed {
-                Button("Retry") {
+            if isFailed {
+                Button {
                     Task { await vm.retryFailed(pending) }
+                } label: {
+                    Text("Retry")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Color.brand)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Color.brandMuted, in: Capsule())
                 }
-                .font(.caption)
-                .buttonStyle(.bordered)
-                .tint(.red)
+                .buttonStyle(.plain)
             } else {
                 Text("Queued")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(.quaternary, in: Capsule())
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.tertiary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(Color(.tertiarySystemBackground), in: Capsule())
             }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 10)
     }
 }

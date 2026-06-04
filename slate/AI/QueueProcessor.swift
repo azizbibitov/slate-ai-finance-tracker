@@ -37,12 +37,11 @@ final class QueueProcessor {
     private func makeTransaction(from parsed: ParsedInput, raw: String, date: Date) -> Transaction? {
         guard parsed.intent == .transaction,
               let amount = parsed.amount,
-              let currency = parsed.currency,
-              let description = parsed.description else { return nil }
+              let currency = parsed.currency else { return nil }
         return Transaction(
             amount: amount,
             currency: currency,
-            desc: description,
+            desc: parsed.description ?? (amount >= 0 ? "income" : "expense"),
             category: parsed.category ?? .other,
             rawInput: raw,
             date: date
