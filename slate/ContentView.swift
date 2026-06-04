@@ -1,66 +1,30 @@
-//
-//  ContentView.swift
-//  slate
-//
-//  Created by Aziz Bibitov on 04.06.2026.
-//
-
 import SwiftUI
 import SwiftData
 
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
-    @Query private var items: [Item]
+    @State private var vm = InputViewModel()
 
     var body: some View {
-        NavigationSplitView {
-            List {
-                ForEach(items) { item in
-                    NavigationLink {
-                        Text("Item at \(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))")
-                    } label: {
-                        Text(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))
-                    }
-                }
-                .onDelete(perform: deleteItems)
+        FeedView()
+            .scrollDismissesKeyboard(.interactively)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                InputBarView()
             }
-#if os(macOS)
-            .navigationSplitViewColumnWidth(min: 180, ideal: 200)
-#endif
-            .toolbar {
-#if os(iOS)
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    EditButton()
-                }
-#endif
-                ToolbarItem {
-                    Button(action: addItem) {
-                        Label("Add Item", systemImage: "plus")
-                    }
+            .overlay(alignment: .top) {
+                if let toast = vm.toast {
+                    ToastView(message: toast)
+                        .padding(.top, 8)
+                        .transition(.move(edge: .top).combined(with: .opacity))
                 }
             }
-        } detail: {
-            Text("Select an item")
-        }
-    }
-
-    private func addItem() {
-        withAnimation {
-            let newItem = Item(timestamp: Date())
-            modelContext.insert(newItem)
-        }
-    }
-
-    private func deleteItems(offsets: IndexSet) {
-        withAnimation {
-            for index in offsets {
-                modelContext.delete(items[index])
-            }
-        }
+            .animation(.spring(duration: 0.3), value: vm.toast)
+            .environment(vm)
+            .task { vm.setup(modelContext: modelContext) }
     }
 }
 
 #Preview {
     ContentView()
-        .modelContainer(for: Item.self, inMemory: true)
+        .modelContainer(for: [Transaction.self, PendingInput.self], inMemory: true)
 }

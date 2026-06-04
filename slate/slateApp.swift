@@ -1,10 +1,3 @@
-//
-//  slateApp.swift
-//  slate
-//
-//  Created by Aziz Bibitov on 04.06.2026.
-//
-
 import SwiftUI
 import SwiftData
 
@@ -12,10 +5,10 @@ import SwiftData
 struct slateApp: App {
     var sharedModelContainer: ModelContainer = {
         let schema = Schema([
-            Item.self,
+            Transaction.self,
+            PendingInput.self,
         ])
         let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
-
         do {
             return try ModelContainer(for: schema, configurations: [modelConfiguration])
         } catch {
