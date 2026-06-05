@@ -7,6 +7,8 @@ struct ParsedInput: Codable, Sendable {
         case query
         case transfer
         case createAccount
+        case switchAccount
+        case unknown
     }
 
     enum QueryType: String, Codable, Sendable {
@@ -17,10 +19,26 @@ struct ParsedInput: Codable, Sendable {
 
     enum QueryPeriod: String, Codable, Sendable {
         case today
+        case yesterday
         case week
         case month
         case year
         case all
+
+        init(from decoder: Decoder) throws {
+            let raw = try decoder.singleValueContainer().decode(String.self)
+            if let exact = QueryPeriod(rawValue: raw) {
+                self = exact
+            } else {
+                let lower = raw.lowercased()
+                if lower.contains("yesterday")              { self = .yesterday }
+                else if lower.contains("week")              { self = .week }
+                else if lower.contains("year")              { self = .year }
+                else if lower.contains("today") || lower.contains("day") { self = .today }
+                else if lower.contains("all") || lower.contains("ever") { self = .all }
+                else                                        { self = .month }
+            }
+        }
     }
 
     var intent: Intent

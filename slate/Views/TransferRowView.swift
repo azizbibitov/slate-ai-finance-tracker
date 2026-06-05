@@ -7,7 +7,7 @@ struct TransferRowView: View {
     var body: some View {
         HStack(spacing: 14) {
             ZStack {
-                Circle()
+                RoundedRectangle(cornerRadius: 12)
                     .fill(Color(.tertiarySystemBackground))
                     .frame(width: 44, height: 44)
                 Image(systemName: "arrow.left.arrow.right")
@@ -17,7 +17,7 @@ struct TransferRowView: View {
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(source.desc)
-                    .font(.body.weight(.medium))
+                    .font(.system(.body, design: .rounded).weight(.medium))
                     .lineLimit(1)
                 Text("Transfer · " + source.date.formatted(.dateTime.hour().minute()))
                     .font(.caption)
@@ -28,30 +28,18 @@ struct TransferRowView: View {
 
             VStack(alignment: .trailing, spacing: 3) {
                 Text("\(CurrencyFormatter.format(abs(source.amount), showSign: false)) \(source.currency)")
-                    .font(.caption.monospacedDigit().weight(.medium))
+                    .font(.system(.caption, design: .rounded).monospacedDigit().weight(.medium))
                     .foregroundStyle(.secondary)
-                if source.currency != destination.currency {
-                    HStack(spacing: 3) {
-                        Image(systemName: "arrow.right")
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundStyle(Color.brand)
-                        Text("\(CurrencyFormatter.format(destination.amount, showSign: false)) \(destination.currency)")
-                            .font(.caption.monospacedDigit().weight(.semibold))
-                            .foregroundStyle(Color.brand)
-                    }
-                } else {
-                    HStack(spacing: 3) {
-                        Image(systemName: "arrow.right")
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundStyle(.secondary)
-                        Text(destination.desc)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
+                HStack(spacing: 3) {
+                    Image(systemName: "arrow.right")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(source.currency != destination.currency ? Color.brand : .secondary)
+                    Text("\(CurrencyFormatter.format(destination.amount, showSign: false)) \(destination.currency)")
+                        .font(.system(.caption, design: .rounded).monospacedDigit().weight(.semibold))
+                        .foregroundStyle(source.currency != destination.currency ? Color.brand : .secondary)
                 }
             }
         }
-        .padding(.vertical, 10)
+        .padding(.vertical, 11)
     }
 }

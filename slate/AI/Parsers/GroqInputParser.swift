@@ -23,7 +23,7 @@ final class GroqInputParser: InputParserProtocol {
       "category": string | null,
       "queryCategory": string | null,
       "queryType": "income" | "expense" | "accounts" | null,
-      "queryPeriod": "today" | "week" | "month" | "year" | "all" | null,
+      "queryPeriod": "today" | "yesterday" | "week" | "month" | "year" | "all" | null,
       "querySearch": string | null,
       "sourceAccount": string | null,
       "destinationAccount": string | null,
@@ -38,7 +38,9 @@ final class GroqInputParser: InputParserProtocol {
     - "transaction": a regular income or expense
     - "transfer": moving money between accounts ("transferred", "moved", "sent to my card/wallet")
     - "createAccount": creating a new wallet or account ("I have a cash wallet", "create savings", "add card")
+    - "switchAccount": switching the active wallet ("switch to dollar wallet", "use cash", "set card as main", "activate savings")
     - "query": asking about history or balances
+    - "unknown": anything that is NOT financial — commands, random text, questions unrelated to money. When in doubt, use "unknown".
 
     Amount sign rules (transaction only):
     - Expense (negative): bought, spent, paid, cost, purchase, ordered, subscribed, charged
@@ -98,10 +100,12 @@ final class GroqInputParser: InputParserProtocol {
     "I have a cash wallet with 5000 tmt" → {"intent":"createAccount","accountName":"Cash","accountCurrency":"TMT","accountEmoji":"💰","amount":5000}
     "create dollar savings account" → {"intent":"createAccount","accountName":"Dollar savings","accountCurrency":"USD","accountEmoji":"💵"}
     "show accounts" → {"intent":"query","queryType":"accounts"}
+    "switch to dollar wallet" → {"intent":"switchAccount","sourceAccount":"dollar wallet"}
+    "use cash" → {"intent":"switchAccount","sourceAccount":"cash"}
     "show food expenses this month" → {"intent":"query","queryCategory":"food","queryType":"expense","queryPeriod":"month"}
     """
 
-    func parse(input: String) async throws -> ParsedInput {
+    func parse(input: String, context: ParserContext) async throws -> ParsedInput {
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
@@ -110,7 +114,7 @@ final class GroqInputParser: InputParserProtocol {
         let body: [String: Any] = [
             "model": model,
             "messages": [
-                ["role": "system", "content": systemPrompt],
+                ["role": "system", "content": systemPrompt + contextSection(context)],
                 ["role": "user", "content": input]
             ],
             "temperature": 0,
@@ -139,9 +143,19 @@ final class GroqInputParser: InputParserProtocol {
         var cleaned = Self.firstJSONObject(in: stripped) ?? stripped
         // JSON spec forbids +number; LLMs sometimes emit it for positive amounts
         cleaned = Self.stripLeadingPlusFromNumbers(in: cleaned)
+        print("[DEBUG] raw JSON: \(cleaned)")
 
         guard let jsonData = cleaned.data(using: .utf8) else { throw ParserError.decodingFailed }
         return try JSONDecoder().decode(ParsedInput.self, from: jsonData)
+    }
+
+    private func contextSection(_ context: ParserContext) -> String {
+        guard !context.accounts.isEmpty else { return "" }
+        let lines = context.accounts.map { a in
+            "- \(a.name) (\(a.currency))\(a.isDefault ? " [active wallet]" : "")"
+        }
+        return "\n\nUser's current wallets:\n" + lines.joined(separator: "\n")
+            + "\nMatch sourceAccount/destinationAccount to these exact names when the user references a wallet."
     }
 
     // Scan for the first balanced { } block so stray trailing objects are ignored.

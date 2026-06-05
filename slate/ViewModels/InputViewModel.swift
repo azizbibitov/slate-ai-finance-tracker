@@ -12,8 +12,19 @@ final class InputViewModel {
     var isProcessing = false
     var toast: ToastMessage?
     var errorMessage: String?
-    var queryResult: QueryResult?
-    var showAccounts = false
+    var activeSheet: ActiveSheet?
+
+    enum ActiveSheet: Identifiable {
+        case accounts
+        case results(QueryResult)
+
+        var id: String {
+            switch self {
+            case .accounts:         return "accounts"
+            case .results(let r):   return "results-\(r.id)"
+            }
+        }
+    }
 
     let networkMonitor: NetworkMonitor
     let speechRecognizer: any SpeechRecognizerProtocol
@@ -49,8 +60,9 @@ final class InputViewModel {
 
         if networkMonitor.isConnected {
             do {
-                let parsed = try await parser.parse(input: text)
-                print("[DEBUG] parsed: intent=\(parsed.intent) amount=\(String(describing: parsed.amount)) currency=\(String(describing: parsed.currency)) desc=\(String(describing: parsed.description)) category=\(String(describing: parsed.category))")
+                let context = buildContext(storage: storage)
+                let parsed = try await parser.parse(input: text, context: context)
+                print("[DEBUG] input=\(text) intent=\(parsed.intent) amount=\(String(describing: parsed.amount)) desc=\(String(describing: parsed.description))")
                 switch parsed.intent {
                 case .transaction:
                     if let tx = makeTransaction(from: parsed, raw: text, storage: storage) {
@@ -59,32 +71,35 @@ final class InputViewModel {
                         inputText = ""
                         showToast("\(CurrencyFormatter.format(tx.amount, showSign: true)) \(tx.currency) · \(tx.desc)")
                     } else {
-                        errorMessage = "Didn't understand — try: -50 tmt taxi"
+                        errorMessage = "Didn't understand -try: -50 tmt taxi"
                     }
                 case .query:
                     if parsed.queryType == .accounts {
                         inputText = ""
-                        showAccounts = true
+                        activeSheet = .accounts
                     } else {
                         let allTransactions = storage.fetchAllTransactions()
-                        queryResult = QueryFilter.run(query: parsed, transactions: allTransactions, originalText: text)
+                        activeSheet = .results(QueryFilter.run(query: parsed, transactions: allTransactions, originalText: text))
                         inputText = ""
                     }
                 case .transfer:
                     handleTransfer(from: parsed, raw: text, storage: storage)
                 case .createAccount:
                     handleCreateAccount(from: parsed, raw: text, storage: storage)
+                case .switchAccount:
+                    handleSwitchAccount(from: parsed, storage: storage)
+                case .unknown:
+                    errorMessage = "That doesn't look like a financial entry"
                 }
             } catch {
-                print("[DEBUG] parse error: \(error)")
-                errorMessage = "Didn't understand — try: -50 tmt taxi"
+                errorMessage = "Didn't understand - try: -50 tmt taxi"
             }
         } else {
             let pending = PendingInput(rawText: text)
             storage.insertPending(pending)
             try? storage.save()
             inputText = ""
-            showToast("Saved — will process when back online")
+            showToast("Saved -will process when back online")
         }
     }
 
@@ -124,6 +139,20 @@ final class InputViewModel {
         showToast("\(emoji) \(name) created")
     }
 
+    // MARK: - Switch active account
+
+    private func handleSwitchAccount(from parsed: ParsedInput, storage: any StorageRepository) {
+        let accounts = storage.fetchAllAccounts()
+        guard let name = parsed.sourceAccount,
+              let account = resolveAccount(name, in: accounts) else {
+            errorMessage = "Couldn't find that wallet -try: \"use cash wallet\""
+            return
+        }
+        storage.setDefaultAccount(account)
+        inputText = ""
+        showToast("\(account.emoji) \(account.name) is now active")
+    }
+
     // MARK: - Transfer
 
     private func handleTransfer(from parsed: ParsedInput, raw: String, storage: any StorageRepository) {
@@ -131,7 +160,7 @@ final class InputViewModel {
 
         guard let sourceAmount = parsed.amount, sourceAmount > 0,
               let sourceCurrency = parsed.currency else {
-            errorMessage = "Couldn't parse the transfer — try: transferred 100$ from cash to card"
+            errorMessage = "Couldn't parse the transfer -try: transferred 100$ from cash to card"
             return
         }
 
@@ -148,7 +177,7 @@ final class InputViewModel {
         } else if sourceCurrency == destCurrency {
             destAmount = sourceAmount
         } else {
-            errorMessage = "Please add the exchange rate — e.g. \"it was 1\(sourceCurrency)=19.4 \(destCurrency)\""
+            errorMessage = "Please add the exchange rate -e.g. \"it was 1\(sourceCurrency)=19.4 \(destCurrency)\""
             return
         }
 
@@ -234,6 +263,13 @@ final class InputViewModel {
         case "GBP": return "💷"
         default:    return "💳"
         }
+    }
+
+    private func buildContext(storage: any StorageRepository) -> ParserContext {
+        let accounts = storage.fetchAllAccounts()
+        return ParserContext(accounts: accounts.map {
+            ParserContext.AccountInfo(name: $0.name, currency: $0.currency, isDefault: $0.isDefault)
+        })
     }
 
     private func showToast(_ text: String, isError: Bool = false) {

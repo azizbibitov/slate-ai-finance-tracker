@@ -1,66 +1,96 @@
 import SwiftUI
 import SwiftData
 
-struct AccountsSheet: View {
-    @Query(filter: #Predicate<Account> { !$0.isArchived },
-           sort: \Account.sortOrder) private var accounts: [Account]
-    @Query private var transactions: [Transaction]
-    @Environment(\.modelContext) private var modelContext
+struct GlobalSheet: View {
+    @Namespace private var ns
     @Environment(\.dismiss) private var dismiss
+    @Environment(InputViewModel.self) private var vm
 
     var body: some View {
         NavigationStack {
-            List {
-                if accounts.isEmpty {
-                    Section {
-                        emptyState
-                            .listRowBackground(Color.clear)
-                            .listRowSeparator(.hidden)
-                    }
-                } else {
-                    Section {
-                        ForEach(accounts) { account in
-                            accountRow(account)
-                                .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
-                                .listRowSeparatorTint(Color(.separator).opacity(0.5))
-                                .contentShape(Rectangle())
-                                .onTapGesture { setDefault(account) }
-                                .swipeActions(edge: .trailing) {
-                                    Button(role: .destructive) {
-                                        account.isArchived = true
-                                        try? modelContext.save()
-                                    } label: {
-                                        Label("Archive", systemImage: "archivebox")
-                                    }
-                                }
-                        }
-                    } header: {
-                        Text("WALLETS")
-                            .font(.system(size: 11, weight: .semibold, design: .rounded))
-                            .foregroundStyle(.tertiary)
-                            .padding(.horizontal, 20)
-                            .padding(.vertical, 6)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
+            ZStack {
+                if case .accounts = vm.activeSheet {
+                    AccountsContent()
+                        .matchedGeometryEffect(id: "content", in: ns)
+                        .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .top)))
                 }
-
-                Section {
-                    hintRow
-                        .listRowBackground(Color.clear)
-                        .listRowSeparator(.hidden)
-                        .listRowInsets(EdgeInsets(top: 8, leading: 20, bottom: 8, trailing: 20))
+                if case .results(let result) = vm.activeSheet {
+                    ResultsSheet(result: result)
+                        .matchedGeometryEffect(id: "content", in: ns)
+                        .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .top)))
                 }
             }
-            .listStyle(.plain)
-            .navigationTitle("Wallets")
+            .animation(.spring(duration: 0.42, bounce: 0.15), value: vm.activeSheet?.id)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .principal) {
+                    Text(title)
+                        .font(.system(.headline, design: .rounded))
+                        .contentTransition(.opacity)
+                        .animation(.spring(duration: 0.3), value: title)
+                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
                         .foregroundStyle(Color.brand)
                 }
             }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                InputBarView()
+            }
         }
+    }
+
+    private var title: String {
+        switch vm.activeSheet {
+        case .accounts:  return "Wallets"
+        case .results:   return "Results"
+        case nil:        return ""
+        }
+    }
+}
+
+// MARK: - Accounts content
+
+private struct AccountsContent: View {
+    @Query(filter: #Predicate<Account> { !$0.isArchived },
+           sort: \Account.sortOrder) private var accounts: [Account]
+    @Query private var transactions: [Transaction]
+    @Environment(\.modelContext) private var modelContext
+
+    var body: some View {
+        List {
+            if accounts.isEmpty {
+                Section {
+                    emptyState
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                }
+            } else {
+                Section {
+                    ForEach(accounts) { account in
+                        accountRow(account)
+                            .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
+                            .listRowSeparatorTint(Color(.separator).opacity(0.5))
+                            .swipeActions(edge: .trailing) {
+                                Button(role: .destructive) {
+                                    account.isArchived = true
+                                    try? modelContext.save()
+                                } label: {
+                                    Label("Archive", systemImage: "archivebox")
+                                }
+                            }
+                    }
+                } header: {
+                    Text("WALLETS")
+                        .font(.system(size: 11, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.tertiary)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 6)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+        }
+        .listStyle(.plain)
     }
 
     private func accountRow(_ account: Account) -> some View {
@@ -72,7 +102,6 @@ struct AccountsSheet: View {
                     .frame(width: 44, height: 44)
                     .background(account.isDefault ? Color.brandMuted : Color(.secondarySystemBackground),
                                 in: Circle())
-
                 if account.isDefault {
                     Circle()
                         .fill(Color.brand)
@@ -87,24 +116,23 @@ struct AccountsSheet: View {
             }
 
             VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 6) {
-                    Text(account.name)
-                        .font(.body.weight(.medium))
-                    if account.isDefault {
-                        Text("Active")
-                            .font(.system(size: 11, weight: .semibold, design: .rounded))
-                            .foregroundStyle(Color.brand)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Color.brandMuted, in: Capsule())
-                    }
-                }
+                Text(account.name)
+                    .font(.body.weight(.medium))
                 Text(account.currency)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
 
             Spacer()
+
+            if account.isDefault {
+                Text("Active")
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundStyle(Color.brand)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(Color.brandMuted, in: Capsule())
+            }
 
             VStack(alignment: .trailing, spacing: 2) {
                 Text(CurrencyFormatter.format(bal, showSign: bal < 0))
@@ -124,13 +152,6 @@ struct AccountsSheet: View {
             .reduce(0) { $0 + $1.amount }
     }
 
-    private func setDefault(_ account: Account) {
-        guard !account.isDefault else { return }
-        for a in accounts { a.isDefault = false }
-        account.isDefault = true
-        try? modelContext.save()
-    }
-
     private var emptyState: some View {
         VStack(spacing: 14) {
             Image(systemName: "creditcard")
@@ -147,16 +168,5 @@ struct AccountsSheet: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 48)
-    }
-
-    private var hintRow: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "sparkles")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(Color.brand)
-            Text("Tap a wallet to set it as active. All transactions go there by default.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
     }
 }

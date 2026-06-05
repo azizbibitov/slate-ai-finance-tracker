@@ -74,12 +74,22 @@ final class SpeechRecognizer: SpeechRecognizerProtocol {
         }
     }
 
-    // "minutes" is acoustically close to "manats" — in a finance app, "minutes" as a
-    // standalone word always means the currency, never time duration.
+    private static let transcriptFixes: [(pattern: String, replacement: String)] = [
+        // "minutes" is acoustically close to "manats"
+        (#"\bminutes\b"#, "manats"),
+        // "at work" / "atwork" mishearing of "Upwork"
+        (#"\bat\s*work\b"#, "Upwork"),
+    ]
+
     private static func fixTranscript(_ text: String) -> String {
-        let pattern = try? NSRegularExpression(pattern: #"\bminutes\b"#, options: .caseInsensitive)
-        let range = NSRange(text.startIndex..., in: text)
-        return pattern?.stringByReplacingMatches(in: text, range: range, withTemplate: "manats") ?? text
+        var result = text
+        for fix in transcriptFixes {
+            if let pattern = try? NSRegularExpression(pattern: fix.pattern, options: .caseInsensitive) {
+                let range = NSRange(result.startIndex..., in: result)
+                result = pattern.stringByReplacingMatches(in: result, range: range, withTemplate: fix.replacement)
+            }
+        }
+        return result
     }
 
     private func beginAudioSession(onPartialResult: @escaping (String) -> Void) async throws {
@@ -93,7 +103,8 @@ final class SpeechRecognizer: SpeechRecognizerProtocol {
             "dollar", "dollars", "USD",
             "euro", "euros", "EUR",
             "ruble", "rubles", "RUB",
-            "salary", "taxi", "groceries", "coffee", "rent", "utilities"
+            "salary", "taxi", "groceries", "coffee", "rent", "utilities",
+            "Upwork", "Fiverr", "Toptal", "Freelancer"
         ]
         recognitionRequest = request
 

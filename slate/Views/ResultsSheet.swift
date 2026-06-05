@@ -2,51 +2,40 @@ import SwiftUI
 
 struct ResultsSheet: View {
     let result: QueryResult
-    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        NavigationStack {
-            List {
+        List {
+            Section {
+                summaryCard
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+                    .listRowInsets(EdgeInsets(top: 12, leading: 20, bottom: 12, trailing: 20))
+            }
+
+            if result.transactions.isEmpty {
                 Section {
-                    summaryCard
+                    emptyState
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
-                        .listRowInsets(EdgeInsets(top: 12, leading: 20, bottom: 12, trailing: 20))
                 }
-
-                if result.transactions.isEmpty {
-                    Section {
-                        emptyState
-                            .listRowBackground(Color.clear)
+            } else {
+                Section {
+                    ForEach(result.transactions) { tx in
+                        TransactionRowView(transaction: tx)
                             .listRowSeparator(.hidden)
+                            .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
                     }
-                } else {
-                    Section {
-                        ForEach(result.transactions) { tx in
-                            TransactionRowView(transaction: tx)
-                                .listRowSeparator(.hidden)
-                                .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
-                        }
-                    } header: {
-                        Text("TRANSACTIONS")
-                            .font(.system(size: 11, weight: .semibold, design: .rounded))
-                            .foregroundStyle(.tertiary)
-                            .padding(.horizontal, 20)
-                            .padding(.vertical, 6)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                }
-            }
-            .listStyle(.plain)
-            .navigationTitle("Results")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
-                        .foregroundStyle(Color.brand)
+                } header: {
+                    Text("TRANSACTIONS")
+                        .font(.system(size: 11, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.tertiary)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 6)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
         }
+        .listStyle(.plain)
     }
 
     private var summaryCard: some View {
@@ -108,11 +97,12 @@ struct ResultsSheet: View {
 
     private var periodLabel: String {
         switch result.period {
-        case .today: return "today"
-        case .week:  return "past 7 days"
-        case .month: return "this month"
-        case .year:  return "this year"
-        case .all:   return "all time"
+        case .today:     return "today"
+        case .yesterday: return "yesterday"
+        case .week:      return "past 7 days"
+        case .month:     return "this month"
+        case .year:      return "this year"
+        case .all:       return "all time"
         }
     }
 }

@@ -8,18 +8,11 @@ struct TransactionRowView: View {
 
     var body: some View {
         HStack(spacing: 14) {
-            ZStack {
-                Circle()
-                    .fill(isIncome ? Color.brandMuted : Color(.tertiarySystemBackground))
-                    .frame(width: 44, height: 44)
-                Image(systemName: category.sfSymbol)
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundStyle(isIncome ? Color.brand : Color.secondary)
-            }
+            categoryIcon
 
             VStack(alignment: .leading, spacing: 3) {
-                Text(transaction.desc)
-                    .font(.body.weight(.medium))
+                Text(transaction.desc.capitalized)
+                    .font(.system(.body, design: .rounded).weight(.medium))
                     .lineLimit(1)
                 Text(category.rawValue.capitalized + " · " + transaction.date.formatted(.dateTime.hour().minute()))
                     .font(.caption)
@@ -30,13 +23,24 @@ struct TransactionRowView: View {
 
             VStack(alignment: .trailing, spacing: 2) {
                 Text(CurrencyFormatter.format(transaction.amount, showSign: true))
-                    .font(.body.monospacedDigit().weight(.semibold))
+                    .font(.system(.body, design: .rounded).monospacedDigit().weight(.semibold))
                     .foregroundStyle(isIncome ? Color.brand : Color.primary)
                 Text(transaction.currency)
                     .font(.caption2.weight(.medium))
                     .foregroundStyle(.secondary)
             }
         }
-        .padding(.vertical, 10)
+        .padding(.vertical, 11)
+    }
+
+    private var categoryIcon: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 12)
+                .fill(category.color.opacity(0.12))
+                .frame(width: 44, height: 44)
+            Image(systemName: category.sfSymbol)
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(category.color)
+        }
     }
 }

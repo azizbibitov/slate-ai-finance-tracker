@@ -15,9 +15,13 @@ final class QueueProcessor {
         let pending = storage.fetchPending()
         guard !pending.isEmpty else { return }
 
+        let context = ParserContext(accounts: storage.fetchAllAccounts().map {
+            ParserContext.AccountInfo(name: $0.name, currency: $0.currency, isDefault: $0.isDefault)
+        })
+
         for item in pending {
             do {
-                let parsed = try await parser.parse(input: item.rawText)
+                let parsed = try await parser.parse(input: item.rawText, context: context)
                 if let tx = makeTransaction(from: parsed, raw: item.rawText, date: item.entryDate) {
                     storage.insertTransaction(tx)
                     storage.deletePending(item)

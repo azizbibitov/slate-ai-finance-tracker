@@ -21,7 +21,12 @@ enum QueryFilter {
 
         let now = Date()
         let cal = Calendar.current
-        if let start = periodStart(query.queryPeriod ?? .month, from: now, cal: cal) {
+        let period = query.queryPeriod ?? .month
+        if period == .yesterday {
+            let startOfYesterday = cal.startOfDay(for: cal.date(byAdding: .day, value: -1, to: now)!)
+            let startOfToday = cal.startOfDay(for: now)
+            filtered = filtered.filter { $0.date >= startOfYesterday && $0.date < startOfToday }
+        } else if let start = periodStart(period, from: now, cal: cal) {
             filtered = filtered.filter { $0.date >= start }
         }
 
@@ -48,11 +53,12 @@ enum QueryFilter {
 
     private static func periodStart(_ period: ParsedInput.QueryPeriod, from date: Date, cal: Calendar) -> Date? {
         switch period {
-        case .today:  return cal.startOfDay(for: date)
-        case .week:   return cal.date(byAdding: .weekOfYear, value: -1, to: date)
-        case .month:  return cal.date(from: cal.dateComponents([.year, .month], from: date))
-        case .year:   return cal.date(from: cal.dateComponents([.year], from: date))
-        case .all:    return nil
+        case .today:     return cal.startOfDay(for: date)
+        case .yesterday: return cal.startOfDay(for: cal.date(byAdding: .day, value: -1, to: date)!)
+        case .week:      return cal.date(byAdding: .weekOfYear, value: -1, to: date)
+        case .month:     return cal.date(from: cal.dateComponents([.year, .month], from: date))
+        case .year:      return cal.date(from: cal.dateComponents([.year], from: date))
+        case .all:       return nil
         }
     }
 }
