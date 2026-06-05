@@ -4,11 +4,13 @@ import SwiftData
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
     @State private var vm = InputViewModel()
+    @State private var selectedTab: FeedTab = .expense
+    @State private var selectedPeriod: FeedPeriod = .month
 
     var body: some View {
         @Bindable var vm = vm
 
-        FeedView()
+        FeedView(tab: selectedTab, selectedTab: $selectedTab, selectedPeriod: $selectedPeriod)
             .scrollDismissesKeyboard(.interactively)
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 InputBarView()
@@ -24,6 +26,9 @@ struct ContentView: View {
             .sheet(item: $vm.queryResult) { result in
                 ResultsSheet(result: result)
             }
+            .sheet(isPresented: $vm.showAccounts) {
+                AccountsSheet()
+            }
             .environment(vm)
             .task { vm.setup(storage: SwiftDataStorageRepository(context: modelContext)) }
     }
@@ -31,5 +36,5 @@ struct ContentView: View {
 
 #Preview {
     ContentView()
-        .modelContainer(for: [Transaction.self, PendingInput.self], inMemory: true)
+        .modelContainer(for: [Transaction.self, PendingInput.self, Account.self], inMemory: true)
 }

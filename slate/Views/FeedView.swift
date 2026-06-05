@@ -1,21 +1,60 @@
 import SwiftUI
 import SwiftData
 
+enum FeedTab {
+    case expense
+    case income
+}
+
+enum FeedPeriod: CaseIterable {
+    case day, week, month, year
+
+    var label: String {
+        switch self {
+        case .day:   return "Day"
+        case .week:  return "Week"
+        case .month: return "Month"
+        case .year:  return "Year"
+        }
+    }
+
+    func start(from now: Date, cal: Calendar) -> Date {
+        switch self {
+        case .day:   return cal.startOfDay(for: now)
+        case .week:  return cal.date(byAdding: .day, value: -6, to: cal.startOfDay(for: now))!
+        case .month: return cal.date(from: cal.dateComponents([.year, .month], from: now))!
+        case .year:  return cal.date(from: cal.dateComponents([.year], from: now))!
+        }
+    }
+
+    func headerLabel(from now: Date) -> String {
+        switch self {
+        case .day:   return "Today"
+        case .week:  return "Last 7 days"
+        case .month: return now.formatted(.dateTime.month(.wide))
+        case .year:  return now.formatted(.dateTime.year())
+        }
+    }
+}
+
 private enum FeedItem: Identifiable {
     case transaction(Transaction)
+    case transfer(source: Transaction, destination: Transaction)
     case pending(PendingInput)
 
     var id: UUID {
         switch self {
-        case .transaction(let t): return t.id
-        case .pending(let p): return p.id
+        case .transaction(let t):   return t.id
+        case .transfer(let s, _):   return s.id
+        case .pending(let p):       return p.id
         }
     }
 
     var date: Date {
         switch self {
-        case .transaction(let t): return t.date
-        case .pending(let p): return p.entryDate
+        case .transaction(let t):   return t.date
+        case .transfer(let s, _):   return s.date
+        case .pending(let p):       return p.entryDate
         }
     }
 }
@@ -28,15 +67,47 @@ private struct DateGroup: Identifiable {
 }
 
 struct FeedView: View {
+    let tab: FeedTab
+    @Binding var selectedTab: FeedTab
+    @Binding var selectedPeriod: FeedPeriod
+
     @Query(sort: \Transaction.date, order: .reverse) private var transactions: [Transaction]
     @Query(sort: \PendingInput.entryDate, order: .reverse) private var pendingInputs: [PendingInput]
     @Environment(InputViewModel.self) private var vm
     @Environment(\.modelContext) private var modelContext
 
+    private var periodStart: Date {
+        selectedPeriod.start(from: Date(), cal: Calendar.current)
+    }
+
     private var feedItems: [FeedItem] {
-        let txItems = transactions.map(FeedItem.transaction)
-        let pendingItems = pendingInputs.map(FeedItem.pending)
-        return (txItems + pendingItems).sorted { $0.date > $1.date }
+        var items: [FeedItem] = []
+
+        var transferGroups: [UUID: [Transaction]] = [:]
+        var regular: [Transaction] = []
+        for tx in transactions where tx.date >= periodStart {
+            if let tid = tx.transferID {
+                transferGroups[tid, default: []].append(tx)
+            } else {
+                regular.append(tx)
+            }
+        }
+
+        let filtered = regular.filter { tab == .expense ? $0.amount < 0 : $0.amount > 0 }
+        items.append(contentsOf: filtered.map { .transaction($0) })
+
+        if tab == .expense {
+            for (_, pair) in transferGroups {
+                if pair.count == 2,
+                   let source = pair.first(where: { $0.amount < 0 }),
+                   let dest = pair.first(where: { $0.amount > 0 }) {
+                    items.append(.transfer(source: source, destination: dest))
+                }
+            }
+        }
+
+        items.append(contentsOf: pendingInputs.map { .pending($0) })
+        return items.sorted { $0.date > $1.date }
     }
 
     private var groupedItems: [DateGroup] {
@@ -83,9 +154,17 @@ struct FeedView: View {
                                     .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                                         Button(role: .destructive) {
                                             modelContext.delete(tx)
-                                        } label: {
-                                            Label("Delete", systemImage: "trash")
-                                        }
+                                        } label: { Label("Delete", systemImage: "trash") }
+                                    }
+                            case .transfer(let source, let dest):
+                                TransferRowView(source: source, destination: dest)
+                                    .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
+                                    .listRowSeparatorTint(Color(.separator).opacity(0.5))
+                                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                        Button(role: .destructive) {
+                                            modelContext.delete(source)
+                                            modelContext.delete(dest)
+                                        } label: { Label("Delete", systemImage: "trash") }
                                     }
                             case .pending(let p):
                                 PendingRowView(pending: p)
@@ -94,9 +173,7 @@ struct FeedView: View {
                                     .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                                         Button(role: .destructive) {
                                             modelContext.delete(p)
-                                        } label: {
-                                            Label("Delete", systemImage: "trash")
-                                        }
+                                        } label: { Label("Delete", systemImage: "trash") }
                                     }
                             }
                         }
@@ -133,7 +210,15 @@ struct FeedView: View {
 
             Spacer().frame(height: 18)
 
-            if thisMonthNets.isEmpty {
+            tabSwitcher
+
+            Spacer().frame(height: 14)
+
+            periodPicker
+
+            Spacer().frame(height: 20)
+
+            if periodTotals.isEmpty {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text("0")
                         .font(.system(size: 52, weight: .bold, design: .rounded).monospacedDigit())
@@ -145,12 +230,12 @@ struct FeedView: View {
                 }
             } else {
                 VStack(alignment: .leading, spacing: 6) {
-                    ForEach(Array(thisMonthNets.enumerated()), id: \.offset) { idx, item in
+                    ForEach(Array(periodTotals.enumerated()), id: \.offset) { idx, item in
                         HStack(alignment: .firstTextBaseline, spacing: 6) {
-                            Text(CurrencyFormatter.format(item.net, showSign: true))
+                            Text(CurrencyFormatter.format(item.total))
                                 .font(.system(size: idx == 0 ? 52 : 26,
                                               weight: .bold, design: .rounded).monospacedDigit())
-                                .foregroundStyle(item.net >= 0 ? Color.brand : Color.primary)
+                                .foregroundStyle(tab == .income ? Color.brand : Color.primary)
                             Text(item.currency)
                                 .font(.system(size: idx == 0 ? 20 : 13,
                                               weight: .semibold, design: .rounded))
@@ -169,23 +254,92 @@ struct FeedView: View {
         }
     }
 
-    private var thisMonthNets: [(currency: String, net: Double)] {
-        let cal = Calendar.current
-        let now = Date()
-        return transactions
-            .filter { cal.isDate($0.date, equalTo: now, toGranularity: .month) }
-            .reduce(into: [:] as [String: Double]) { $0[$1.currency, default: 0] += $1.amount }
-            .map { (currency: $0.key, net: $0.value) }
-            .sorted { abs($0.net) > abs($1.net) }
+    // MARK: - Tab switcher
+
+    private var tabSwitcher: some View {
+        HStack(spacing: 0) {
+            tabPill(label: "Expenses", tab: .expense)
+            tabPill(label: "Income", tab: .income)
+        }
+        .padding(3)
+        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    private func tabPill(label: String, tab: FeedTab) -> some View {
+        let isSelected = selectedTab == tab
+        return Button {
+            withAnimation(.spring(duration: 0.25)) { selectedTab = tab }
+        } label: {
+            Text(label)
+                .font(.system(.subheadline, design: .rounded).weight(.semibold))
+                .foregroundStyle(isSelected ? (tab == .income ? Color.brand : Color.primary) : Color.secondary)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
+                .background(
+                    isSelected
+                        ? AnyShapeStyle(Color(.systemBackground).shadow(.drop(color: .black.opacity(0.07), radius: 4, y: 2)))
+                        : AnyShapeStyle(Color.clear),
+                    in: RoundedRectangle(cornerRadius: 9)
+                )
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - Period picker
+
+    private var periodPicker: some View {
+        HStack(spacing: 6) {
+            ForEach(FeedPeriod.allCases, id: \.label) { period in
+                periodChip(period)
+            }
+        }
+    }
+
+    private func periodChip(_ period: FeedPeriod) -> some View {
+        let isSelected = selectedPeriod == period
+        return Button {
+            withAnimation(.spring(duration: 0.2)) { selectedPeriod = period }
+        } label: {
+            Text(period.label)
+                .font(.system(size: 13, weight: isSelected ? .semibold : .medium, design: .rounded))
+                .foregroundStyle(isSelected ? Color.brand : Color.secondary)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 6)
+                .background(
+                    isSelected ? Color.brandMuted : Color(.secondarySystemBackground),
+                    in: Capsule()
+                )
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - Computed totals / footer
+
+    private var periodTotals: [(currency: String, total: Double)] {
+        transactions
+            .filter {
+                $0.date >= periodStart &&
+                (tab == .expense ? $0.amount < 0 : $0.amount > 0) &&
+                $0.transferID == nil
+            }
+            .reduce(into: [:] as [String: Double]) { $0[$1.currency, default: 0] += abs($1.amount) }
+            .map { (currency: $0.key, total: $0.value) }
+            .sorted { $0.total > $1.total }
     }
 
     private var footerText: String {
-        let cal = Calendar.current
         let now = Date()
-        let monthName = now.formatted(.dateTime.month(.wide))
-        let count = transactions.filter { cal.isDate($0.date, equalTo: now, toGranularity: .month) }.count
-        if count == 0 { return monthName }
-        return "\(monthName) · \(count) \(count == 1 ? "entry" : "entries")"
+        let periodLabel = selectedPeriod.headerLabel(from: now)
+        let count = transactions.filter {
+            $0.date >= periodStart &&
+            (tab == .expense ? $0.amount < 0 : $0.amount > 0) &&
+            $0.transferID == nil
+        }.count
+        if count == 0 { return periodLabel }
+        let word = tab == .expense
+            ? (count == 1 ? "expense" : "expenses")
+            : (count == 1 ? "income entry" : "income entries")
+        return "\(periodLabel) · \(count) \(word)"
     }
 
     // MARK: - Section header
@@ -215,12 +369,11 @@ struct FeedView: View {
                 .font(.system(size: 40, weight: .light))
                 .foregroundStyle(Color.brand.opacity(0.5))
             VStack(spacing: 5) {
-                Text("Start tracking")
+                Text(tab == .expense ? "No expenses" : "No income")
                     .font(.system(.headline, design: .rounded))
-                Text("Type or speak a transaction below")
+                Text("for \(selectedPeriod.headerLabel(from: Date()).lowercased())")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
             }
         }
         .frame(maxWidth: .infinity)

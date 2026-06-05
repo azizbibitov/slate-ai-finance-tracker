@@ -13,6 +13,7 @@ final class InputViewModel {
     var toast: ToastMessage?
     var errorMessage: String?
     var queryResult: QueryResult?
+    var showAccounts = false
 
     let networkMonitor: NetworkMonitor
     let speechRecognizer: any SpeechRecognizerProtocol
@@ -49,20 +50,33 @@ final class InputViewModel {
         if networkMonitor.isConnected {
             do {
                 let parsed = try await parser.parse(input: text)
-                if let tx = makeTransaction(from: parsed, raw: text) {
-                    storage.insertTransaction(tx)
-                    try? storage.save()
-                    inputText = ""
-                    let amountStr = CurrencyFormatter.format(tx.amount, showSign: true)
-                    showToast("\(amountStr) \(tx.currency) · \(tx.desc)")
-                } else if parsed.intent == .query {
-                    let allTransactions = storage.fetchAllTransactions()
-                    queryResult = QueryFilter.run(query: parsed, transactions: allTransactions, originalText: text)
-                    inputText = ""
-                } else {
-                    errorMessage = "Didn't understand — try: -50 tmt taxi"
+                print("[DEBUG] parsed: intent=\(parsed.intent) amount=\(String(describing: parsed.amount)) currency=\(String(describing: parsed.currency)) desc=\(String(describing: parsed.description)) category=\(String(describing: parsed.category))")
+                switch parsed.intent {
+                case .transaction:
+                    if let tx = makeTransaction(from: parsed, raw: text, storage: storage) {
+                        storage.insertTransaction(tx)
+                        try? storage.save()
+                        inputText = ""
+                        showToast("\(CurrencyFormatter.format(tx.amount, showSign: true)) \(tx.currency) · \(tx.desc)")
+                    } else {
+                        errorMessage = "Didn't understand — try: -50 tmt taxi"
+                    }
+                case .query:
+                    if parsed.queryType == .accounts {
+                        inputText = ""
+                        showAccounts = true
+                    } else {
+                        let allTransactions = storage.fetchAllTransactions()
+                        queryResult = QueryFilter.run(query: parsed, transactions: allTransactions, originalText: text)
+                        inputText = ""
+                    }
+                case .transfer:
+                    handleTransfer(from: parsed, raw: text, storage: storage)
+                case .createAccount:
+                    handleCreateAccount(from: parsed, raw: text, storage: storage)
                 }
             } catch {
+                print("[DEBUG] parse error: \(error)")
                 errorMessage = "Didn't understand — try: -50 tmt taxi"
             }
         } else {
@@ -81,6 +95,147 @@ final class InputViewModel {
         await queueProcessor?.flushQueue()
     }
 
+    // MARK: - Account creation
+
+    private func handleCreateAccount(from parsed: ParsedInput, raw: String, storage: any StorageRepository) {
+        let accounts = storage.fetchAllAccounts()
+        let name = parsed.accountName ?? "Account"
+        let currency = parsed.accountCurrency ?? parsed.currency ?? "TMT"
+        let emoji = parsed.accountEmoji ?? Self.defaultEmoji(for: currency)
+
+        let isFirst = accounts.isEmpty
+        let account = Account(name: name, currency: currency, emoji: emoji, sortOrder: accounts.count, isDefault: isFirst)
+        storage.insertAccount(account)
+
+        if let openingBalance = parsed.amount, openingBalance != 0 {
+            let tx = Transaction(
+                amount: openingBalance,
+                currency: currency,
+                desc: "Opening balance",
+                category: .other,
+                rawInput: raw,
+                accountID: account.id
+            )
+            storage.insertTransaction(tx)
+        }
+
+        try? storage.save()
+        inputText = ""
+        showToast("\(emoji) \(name) created")
+    }
+
+    // MARK: - Transfer
+
+    private func handleTransfer(from parsed: ParsedInput, raw: String, storage: any StorageRepository) {
+        let accounts = storage.fetchAllAccounts()
+
+        guard let sourceAmount = parsed.amount, sourceAmount > 0,
+              let sourceCurrency = parsed.currency else {
+            errorMessage = "Couldn't parse the transfer — try: transferred 100$ from cash to card"
+            return
+        }
+
+        let sourceAccount = parsed.sourceAccount.flatMap { resolveAccount($0, in: accounts) }
+            ?? storage.fetchDefaultAccount()
+        let destAccount = parsed.destinationAccount.flatMap { resolveAccount($0, in: accounts) }
+        let destCurrency = destAccount?.currency ?? sourceCurrency
+
+        let destAmount: Double
+        if let explicit = parsed.destinationAmount {
+            destAmount = explicit
+        } else if let rate = parsed.exchangeRate {
+            destAmount = sourceAmount * rate
+        } else if sourceCurrency == destCurrency {
+            destAmount = sourceAmount
+        } else {
+            errorMessage = "Please add the exchange rate — e.g. \"it was 1\(sourceCurrency)=19.4 \(destCurrency)\""
+            return
+        }
+
+        let transferID = UUID()
+        let destName = destAccount?.name ?? parsed.destinationAccount ?? "account"
+        let sourceName = sourceAccount?.name ?? parsed.sourceAccount ?? "account"
+
+        let sourceTx = Transaction(
+            amount: -sourceAmount,
+            currency: sourceCurrency,
+            desc: "To \(destName)",
+            category: .transfer,
+            rawInput: raw,
+            accountID: sourceAccount?.id,
+            transferID: transferID,
+            counterpartAccountID: destAccount?.id
+        )
+        let destTx = Transaction(
+            amount: destAmount,
+            currency: destCurrency,
+            desc: "From \(sourceName)",
+            category: .transfer,
+            rawInput: raw,
+            accountID: destAccount?.id,
+            transferID: transferID,
+            counterpartAccountID: sourceAccount?.id
+        )
+
+        storage.insertTransaction(sourceTx)
+        storage.insertTransaction(destTx)
+        try? storage.save()
+        inputText = ""
+
+        if sourceCurrency != destCurrency {
+            showToast("\(CurrencyFormatter.format(sourceAmount, showSign: false)) \(sourceCurrency) → \(CurrencyFormatter.format(destAmount, showSign: false)) \(destCurrency)")
+        } else {
+            showToast("Transfer · \(CurrencyFormatter.format(sourceAmount, showSign: false)) \(sourceCurrency)")
+        }
+    }
+
+    // MARK: - Helpers
+
+    private func makeTransaction(from parsed: ParsedInput, raw: String, storage: any StorageRepository) -> Transaction? {
+        guard parsed.intent == .transaction,
+              let amount = parsed.amount,
+              let currency = parsed.currency else { return nil }
+        let accounts = storage.fetchAllAccounts()
+        let account = parsed.sourceAccount.flatMap { resolveAccount($0, in: accounts) }
+            ?? storage.fetchDefaultAccount()
+        return Transaction(
+            amount: amount,
+            currency: currency,
+            desc: parsed.description ?? (amount >= 0 ? "income" : "expense"),
+            category: parsed.category ?? .other,
+            rawInput: raw,
+            accountID: account?.id
+        )
+    }
+
+    private func resolveAccount(_ name: String, in accounts: [Account]) -> Account? {
+        let lower = name.lowercased()
+        if let exact = accounts.first(where: { $0.name.lowercased() == lower }) { return exact }
+        if let sub = accounts.first(where: {
+            $0.name.lowercased().contains(lower) || lower.contains($0.name.lowercased())
+        }) { return sub }
+        let currencyKeywords: [String: String] = [
+            "dollar": "USD", "usd": "USD",
+            "euro": "EUR", "eur": "EUR",
+            "manat": "TMT", "tmt": "TMT",
+            "ruble": "RUB", "rub": "RUB",
+            "pound": "GBP", "gbp": "GBP"
+        ]
+        if let currency = currencyKeywords[lower] {
+            return accounts.first { $0.currency == currency }
+        }
+        return nil
+    }
+
+    private static func defaultEmoji(for currency: String) -> String {
+        switch currency.uppercased() {
+        case "USD": return "💵"
+        case "EUR": return "💶"
+        case "GBP": return "💷"
+        default:    return "💳"
+        }
+    }
+
     private func showToast(_ text: String, isError: Bool = false) {
         toast = ToastMessage(text: text, isError: isError)
         Task {
@@ -88,18 +243,4 @@ final class InputViewModel {
             if toast?.text == text { toast = nil }
         }
     }
-
-    private func makeTransaction(from parsed: ParsedInput, raw: String) -> Transaction? {
-        guard parsed.intent == .transaction,
-              let amount = parsed.amount,
-              let currency = parsed.currency else { return nil }
-        return Transaction(
-            amount: amount,
-            currency: currency,
-            desc: parsed.description ?? (amount >= 0 ? "income" : "expense"),
-            category: parsed.category ?? .other,
-            rawInput: raw
-        )
-    }
-
 }

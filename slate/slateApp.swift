@@ -7,6 +7,7 @@ struct slateApp: App {
         let schema = Schema([
             Transaction.self,
             PendingInput.self,
+            Account.self,
         ])
         let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
         do {

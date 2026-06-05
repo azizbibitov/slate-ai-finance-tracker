@@ -10,21 +10,13 @@ final class SwiftDataStorageRepository: StorageRepository {
         self.context = context
     }
 
-    func insertTransaction(_ transaction: Transaction) {
-        context.insert(transaction)
-    }
+    func insertTransaction(_ transaction: Transaction) { context.insert(transaction) }
+    func insertPending(_ pending: PendingInput) { context.insert(pending) }
+    func deletePending(_ pending: PendingInput) { context.delete(pending) }
+    func insertAccount(_ account: Account) { context.insert(account) }
+    func deleteAccount(_ account: Account) { context.delete(account) }
 
-    func insertPending(_ pending: PendingInput) {
-        context.insert(pending)
-    }
-
-    func deletePending(_ pending: PendingInput) {
-        context.delete(pending)
-    }
-
-    func save() throws {
-        try context.save()
-    }
+    func save() throws { try context.save() }
 
     func fetchPending() -> [PendingInput] {
         let status = PendingInput.Status.pending.rawValue
@@ -37,5 +29,23 @@ final class SwiftDataStorageRepository: StorageRepository {
 
     func fetchAllTransactions() -> [Transaction] {
         (try? context.fetch(FetchDescriptor<Transaction>())) ?? []
+    }
+
+    func fetchAllAccounts() -> [Account] {
+        let descriptor = FetchDescriptor<Account>(
+            predicate: #Predicate { !$0.isArchived },
+            sortBy: [SortDescriptor(\.sortOrder)]
+        )
+        return (try? context.fetch(descriptor)) ?? []
+    }
+
+    func fetchDefaultAccount() -> Account? {
+        fetchAllAccounts().first { $0.isDefault } ?? fetchAllAccounts().first
+    }
+
+    func setDefaultAccount(_ account: Account) {
+        for a in fetchAllAccounts() { a.isDefault = false }
+        account.isDefault = true
+        try? context.save()
     }
 }

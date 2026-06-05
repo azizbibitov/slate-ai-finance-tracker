@@ -12,6 +12,11 @@ enum TransactionCategory: String, CaseIterable, Codable, Sendable {
     case transfer
     case other
 
+    init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = TransactionCategory(rawValue: raw) ?? .other
+    }
+
     var sfSymbol: String {
         switch self {
         case .food:          return "fork.knife"

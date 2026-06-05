@@ -3,10 +3,12 @@
 Natural-language expense and income tracker for iOS. Type or speak what happened — Slate understands and logs it instantly.
 
 ```
--50 tmt taxi
-salary came in 3000
+spent 50 tmt on taxi
++500$ upwork
 i received 200$ from my mother
-show what I spent on food this month
+transferred 100$ to tmt wallet at rate 19.4
+show food expenses this month
+I have a cash wallet with 5000 tmt
 ```
 
 Offline-first. If there's no connection, inputs queue locally and flush automatically when connectivity returns. The transaction's date is always when you entered it, never when it was parsed.
@@ -15,48 +17,45 @@ Offline-first. If there's no connection, inputs queue locally and flush automati
 
 - Natural language input - English, Russian, Turkmen
 - Voice input via SFSpeechRecognizer (English on-device, Russian server-side)
-- Query your history: "show food expenses this month" opens a filtered results sheet
+- Multiple wallets with different currencies - one active wallet receives all transactions by default
+- Transfers between wallets, including cross-currency with user-stated rate
+- Expense and income tabs with Day / Week / Month / Year period filter
+- Query history: "show food expenses this month", "show accounts", "expenses for [name] last week"
+- Categories auto-detected by AI: food, transport, salary, shopping, health, utilities, entertainment, rent, other
 - Offline queue: entries are never lost, parsed automatically when back online
 - iCloud sync via SwiftData + CloudKit
-- Three AI backends: Groq (default, fastest), OpenAI, Gemini
 - Swipe to delete transactions
-- Date-grouped feed with monthly net balance header
 
 ## Requirements
 
 - Xcode 16+
 - iOS 17+
-- A Groq, OpenAI, or Gemini API key
+- A Groq API key (free tier available at console.groq.com)
 
 ## Setup
 
 1. Clone the repo
-2. Create `slate/Secrets.swift` (already gitignored) with your keys:
+2. Create `slate/Secrets.swift` (already gitignored):
 
 ```swift
 enum Secrets {
-    static let groqKey   = "gsk_..."   // default parser
-    static let openAIKey = "sk-..."    // optional fallback
-    static let geminiKey = "AI..."     // optional fallback
+    static let groqKey = "gsk_..."
 }
 ```
 
 3. Open `slate.xcodeproj` in Xcode and run on simulator or device.
 
-To switch the active parser, edit `ParserFactory.swift` and return the implementation you want.
-
 ## Architecture
 
 ```
 slate/
-  AI/Parsers/     - GroqInputParser (default), CloudInputParser, GeminiInputParser
-  Logic/          - CurrencyFormatter, QueryFilter, Theme (Color.brand)
-  Models/         - Transaction, PendingInput, TransactionCategory
-  Network/        - NetworkMonitor (NWPathMonitor wrapper)
+  AI/Parsers/     - GroqInputParser (llama-3.1-8b-instant)
+  Logic/          - CurrencyFormatter, QueryFilter, Theme
+  Models/         - Transaction, PendingInput, Account, TransactionCategory
   Storage/        - StorageRepository protocol + SwiftDataStorageRepository
   ViewModels/     - InputViewModel (@Observable)
-  Views/          - FeedView, InputBarView, ResultsSheet, ToastView, ...
-  Voice/          - SpeechRecognizer + SpeechRecognizerProtocol
+  Views/          - FeedView, AccountsSheet, InputBarView, ResultsSheet, ...
+  Voice/          - SpeechRecognizer
 ```
 
 Key decisions:
@@ -64,23 +63,10 @@ Key decisions:
 - **Storage behind a protocol** - `InputViewModel` and `QueueProcessor` never import SwiftData directly
 - **Transaction.date = entry time** - offline entries appear at the time the user spoke them, not parse time
 - **`@Observable` + Swift 6** - no `ObservableObject`, strict concurrency throughout
-
-## Building
-
-```bash
-# Build for iOS simulator
-xcodebuild -project slate.xcodeproj -scheme slate -destination 'platform=iOS Simulator,name=iPhone 15' build
-
-# Run tests
-xcodebuild test -project slate.xcodeproj -scheme slateTests -destination 'platform=iOS Simulator,name=iPhone 15'
-```
+- **Lenient category decoding** - unknown AI-returned category strings fall back to `.other` instead of crashing
 
 ## Roadmap
 
-- [ ] Accounts (Cash, Card, Savings) with per-account balances
-- [ ] Transfers between accounts via natural language
-- [ ] Custom categories with colors and SF Symbols
 - [ ] Charts - spending by category, income vs expenses, balance over time
 - [ ] watchOS target
-- [ ] macOS target
-- [ ] Foundation Models parser (iOS 26, on-device, no network)
+- [ ] Foundation Models parser (iOS 26, on-device, no API key needed)

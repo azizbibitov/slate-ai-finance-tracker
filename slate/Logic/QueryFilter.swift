@@ -33,6 +33,10 @@ enum QueryFilter {
             filtered = filtered.filter { $0.transactionCategory == cat }
         }
 
+        if let search = query.querySearch, !search.isEmpty {
+            filtered = filtered.filter { $0.desc.lowercased().contains(search) }
+        }
+
         return QueryResult(
             originalQuery: originalText,
             transactions: filtered,

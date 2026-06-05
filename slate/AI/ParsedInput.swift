@@ -5,11 +5,14 @@ struct ParsedInput: Codable, Sendable {
     enum Intent: String, Codable, Sendable {
         case transaction
         case query
+        case transfer
+        case createAccount
     }
 
     enum QueryType: String, Codable, Sendable {
         case income
         case expense
+        case accounts
     }
 
     enum QueryPeriod: String, Codable, Sendable {
@@ -32,4 +35,16 @@ struct ParsedInput: Codable, Sendable {
     var queryCategory: TransactionCategory?
     var queryType: QueryType?
     var queryPeriod: QueryPeriod?
+    var querySearch: String?      // keyword to match against description (person, place, note)
+
+    // Transfer fields
+    var sourceAccount: String?
+    var destinationAccount: String?
+    var exchangeRate: Double?
+    var destinationAmount: Double?
+
+    // Create account fields
+    var accountName: String?
+    var accountCurrency: String?
+    var accountEmoji: String?
 }

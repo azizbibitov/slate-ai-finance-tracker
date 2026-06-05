@@ -1462,9 +1462,31 @@ var destinationAccountID: UUID? // non-nil on the positive leg
 // Transfer fields (only when intent == .transfer)
 var sourceAccount: String?       // matched against known account names
 var destinationAccount: String?
+var exchangeRate: Double?        // only for cross-currency transfers, user-supplied
+var destinationAmount: Double?   // alternative to rate — user states both amounts
 ```
 
-`Intent` gains a `.transfer` case.
+`Intent` gains a `.transfer` case and a `.createAccount` case.
+
+**Cross-currency transfers:**
+
+The user supplies the rate or destination amount inline. No live rate API - TMT is not freely traded and official/street rates differ. Examples:
+
+```
+"transferred 100$ to tmt wallet at rate 19.4"
+"moved 100 dollars to manat card, got 1940 tmt"
+"transfer 50$ to savings at 19.4"
+"transferred 100$ to tmt wallet, it was 1$=19.4"
+"moved 50 dollars to card, 1 usd = 19.4 tmt"
+"100$ to manat, rate was 1=19.4"
+"dollar is 19.4 today, moved 200 to tmt"
+```
+
+Parser extracts `exchangeRate` or `destinationAmount`. App computes the missing side:
+- If `exchangeRate` given: `destinationAmount = sourceAmount * exchangeRate`
+- If `destinationAmount` given: `exchangeRate = destinationAmount / sourceAmount`
+
+Both are stored on the transfer record for display and audit.
 
 ---
 
@@ -1514,9 +1536,20 @@ A dedicated Charts tab (iOS, macOS) showing spending trends over time.
 
 When the parser returns `intent == .transfer`:
 
-1. `InputViewModel` resolves `sourceAccount` and `destinationAccount` strings to `Account` objects (fuzzy match on name)
-2. Creates two `Transaction` objects with a shared `transferID`
-3. One is negative on the source account, one is positive on the destination
-4. Feed shows them as a single "Transfer" row with → arrow
+1. `InputViewModel` resolves `sourceAccount` and `destinationAccount` strings to `Account` objects via fuzzy name matching ("card" → "Kapitalbank Card", "manat" → "TMT Cash", etc.)
+2. Computes destination amount from `exchangeRate` or `destinationAmount` (whichever was supplied)
+3. Creates two `Transaction` objects with a shared `transferID` — one negative on source, one positive on destination
+4. Feed shows them as a single "Transfer" row: `Cash → Card · 100 USD / 1,940 TMT`
 
-If account names can't be resolved, fall back to asking the user to clarify (inline prompt below the input bar).
+When the parser returns `intent == .createAccount`:
+
+1. `InputViewModel` creates a new `Account` from the parsed name, currency, and optional opening balance
+2. Shows a toast confirming creation: `"Cash wallet created · 5,000 TMT"`
+
+**Account name resolution** (fuzzy matching rules):
+- Exact match first
+- Then case-insensitive substring match
+- Then currency match as last resort ("dollar wallet" → first USD account)
+- If still ambiguous, show inline clarification prompt below input bar
+
+If account names can't be resolved and no clarification is possible, fall back to logging as a regular income/expense transaction with a note.

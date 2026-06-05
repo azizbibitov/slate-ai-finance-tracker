@@ -16,52 +16,89 @@ final class GroqInputParser: InputParserProtocol {
 
     JSON schema:
     {
-      "intent": "transaction" | "query",
+      "intent": "transaction" | "query" | "transfer" | "createAccount",
       "amount": number | null,
       "currency": string | null,
       "description": string | null,
       "category": string | null,
       "queryCategory": string | null,
-      "queryType": "income" | "expense" | null,
-      "queryPeriod": "today" | "week" | "month" | "year" | "all" | null
+      "queryType": "income" | "expense" | "accounts" | null,
+      "queryPeriod": "today" | "week" | "month" | "year" | "all" | null,
+      "querySearch": string | null,
+      "sourceAccount": string | null,
+      "destinationAccount": string | null,
+      "exchangeRate": number | null,
+      "destinationAmount": number | null,
+      "accountName": string | null,
+      "accountCurrency": string | null,
+      "accountEmoji": string | null
     }
 
-    Amount sign rules:
+    Intent rules:
+    - "transaction": a regular income or expense
+    - "transfer": moving money between accounts ("transferred", "moved", "sent to my card/wallet")
+    - "createAccount": creating a new wallet or account ("I have a cash wallet", "create savings", "add card")
+    - "query": asking about history or balances
+
+    Amount sign rules (transaction only):
     - Expense (negative): bought, spent, paid, cost, purchase, ordered, subscribed, charged
-    - Income (positive): received, got, earned, salary, income, profit, refund, gave me, sent me, transferred to me, from [person/source]
+    - Income (positive): + prefix on amount, received, got, earned, salary, income, profit, refund, gave me, sent me, from [person], freelance platform names
     - Ambiguous with no income signal → treat as expense
 
     Description rules:
     - Always set a short English description (1-3 words). NEVER return null for description on a transaction.
     - Use the item/purpose: "taxi", "salary", "coffee", "from mom"
-    - If no clear item, use the person/source: "from mother", "from friend"
     - Last resort fallback: "income" for positive, "expense" for negative
 
     Currency rules:
-    - $ or USD → "USD"
-    - € or EUR → "EUR"
-    - £ or GBP → "GBP"
-    - ₽ or rub → "RUB"
-    - tmt, manat, m → "TMT"
+    - $ or USD → "USD"; € or EUR → "EUR"; £ or GBP → "GBP"; ₽ or rub → "RUB"; tmt/manat → "TMT"
     - Default to TMT if no currency mentioned
 
     Category rules:
-    - transfer: ONLY when moving between user's own accounts/wallets ("moved to savings", "topped up card")
-    - salary: regular paycheck or wage
-    - other: gifts, money from family/friends, any income where source is a person
-    - Never use transfer just because a person is the source of income
+    - If the user explicitly names a category (e.g. "category food", "it's entertainment", "mark as health"), use that category.
+    - Otherwise pick the best fit from: food, transport, salary, shopping, health, utilities, entertainment, rent, transfer, other
+    - food: anything edible or drinkable — groceries, restaurants, cafes, coffee, water (drink/bottle), sushi, pizza, food delivery (wolt, glovo, etc.), snacks
+    - utilities: recurring bills — electricity, gas, water BILL, internet, phone plan, AI tools (claude, chatgpt), software subscriptions
+    - salary: wages, freelance platforms (upwork, fiverr, toptal, freelancer), any job/work income
+    - entertainment: streaming (netflix, spotify), games, movies, hobbies
+    - transfer: ONLY for same-account movements, never for person-to-person income
+    - other: gifts, money from family/friends, anything that doesn't fit above
+
+    Transfer rules:
+    - amount: always the source amount (positive number)
+    - currency: source currency
+    - sourceAccount/destinationAccount: account names as user stated them (or null)
+    - For cross-currency: set exchangeRate if user says "at 19.4" / "1$=19.4" / "rate was 19.4"
+    - Set destinationAmount if user states it directly ("got 1940 tmt")
+
+    createAccount rules:
+    - accountName: name as stated ("Cash", "Kapitalbank", "Dollar savings")
+    - accountCurrency: detected from name or context
+    - accountEmoji: pick a fitting emoji (💵 USD, 💳 card, 💰 cash, 🏦 bank, 💴 TMT/RUB)
+    - amount: opening balance if mentioned (positive)
 
     Query rules:
-    - "show", "see", "how much", "list", "display", "what did I", "total" → query intent
+    - "show accounts"/"show wallets"/"my balances" → queryType: "accounts"
     - Default queryPeriod to "month" if not specified
+    - querySearch: extract any person name, place, or keyword the user wants to filter by
+      e.g. "expenses for [name]" → querySearch: "[name]"
+      e.g. "taxi spending this week" → querySearch: "taxi"
+      e.g. "what did I spend at Berkarar" → querySearch: "berkarar"
+      Set to lowercase. Null if no specific keyword.
 
-    Language: user may write in English, Russian, or Turkmen — parse correctly regardless.
+    Language: English, Russian, or Turkmen — parse correctly regardless.
 
     Examples:
-    "i received 200$ from my mother" → {"intent":"transaction","amount":200,"currency":"USD","description":"from mother","category":"other",...}
-    "spent 50 tmt on taxi" → {"intent":"transaction","amount":-50,"currency":"TMT","description":"taxi","category":"transport",...}
-    "salary 3000" → {"intent":"transaction","amount":3000,"currency":"TMT","description":"salary","category":"salary",...}
-    "show food expenses this month" → {"intent":"query","queryCategory":"food","queryType":"expense","queryPeriod":"month",...}
+    "i received 200$ from my mother" → {"intent":"transaction","amount":200,"currency":"USD","description":"from mother","category":"other"}
+    "+500$ upwork" → {"intent":"transaction","amount":500,"currency":"USD","description":"upwork","category":"salary"}
+    "spent 50 tmt on taxi" → {"intent":"transaction","amount":-50,"currency":"TMT","description":"taxi","category":"transport"}
+    "transferred 100$ to tmt wallet at rate 19.4" → {"intent":"transfer","amount":100,"currency":"USD","destinationAccount":"tmt wallet","exchangeRate":19.4}
+    "moved 100 dollars to manat card, got 1940 tmt" → {"intent":"transfer","amount":100,"currency":"USD","destinationAccount":"manat card","destinationAmount":1940}
+    "transferred 100$ to tmt wallet, it was 1$=19.4" → {"intent":"transfer","amount":100,"currency":"USD","destinationAccount":"tmt wallet","exchangeRate":19.4}
+    "I have a cash wallet with 5000 tmt" → {"intent":"createAccount","accountName":"Cash","accountCurrency":"TMT","accountEmoji":"💰","amount":5000}
+    "create dollar savings account" → {"intent":"createAccount","accountName":"Dollar savings","accountCurrency":"USD","accountEmoji":"💵"}
+    "show accounts" → {"intent":"query","queryType":"accounts"}
+    "show food expenses this month" → {"intent":"query","queryCategory":"food","queryType":"expense","queryPeriod":"month"}
     """
 
     func parse(input: String) async throws -> ParsedInput {
@@ -99,7 +136,9 @@ final class GroqInputParser: InputParserProtocol {
             .replacingOccurrences(of: "```json", with: "")
             .replacingOccurrences(of: "```", with: "")
 
-        let cleaned = Self.firstJSONObject(in: stripped) ?? stripped
+        var cleaned = Self.firstJSONObject(in: stripped) ?? stripped
+        // JSON spec forbids +number; LLMs sometimes emit it for positive amounts
+        cleaned = Self.stripLeadingPlusFromNumbers(in: cleaned)
 
         guard let jsonData = cleaned.data(using: .utf8) else { throw ParserError.decodingFailed }
         return try JSONDecoder().decode(ParsedInput.self, from: jsonData)
@@ -123,6 +162,13 @@ final class GroqInputParser: InputParserProtocol {
             }
         }
         return nil
+    }
+
+    // Replace patterns like `: +500` with `: 500` — JSON forbids leading + on numbers.
+    static func stripLeadingPlusFromNumbers(in text: String) -> String {
+        guard let regex = try? NSRegularExpression(pattern: #"(:\s*)\+(\d)"#) else { return text }
+        let range = NSRange(text.startIndex..., in: text)
+        return regex.stringByReplacingMatches(in: text, range: range, withTemplate: "$1$2")
     }
 }
 
