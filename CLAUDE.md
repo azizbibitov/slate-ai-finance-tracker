@@ -12,15 +12,7 @@ Slate is a natural-language expense and income tracker. The user types or speaks
 
 ## Building and Running
 
-This is an Xcode project. Build and run via Xcode or:
-
-```bash
-# Build for iOS simulator
-xcodebuild -project slate.xcodeproj -scheme slate -destination 'platform=iOS Simulator,name=iPhone 15' build
-
-# Run tests
-xcodebuild test -project slate.xcodeproj -scheme slateTests -destination 'platform=iOS Simulator,name=iPhone 15'
-```
+This is an Xcode project. Build and run via Xcode only - never run xcodebuild.
 
 ## Architecture
 
@@ -30,7 +22,7 @@ All code lives in `slate/` (iOS only - no watchOS or macOS targets yet):
 slate/
   AI/
     Parsers/          - GroqInputParser (only active parser)
-    InputParserProtocol.swift
+    InputParserProtocol.swift - protocol + ParserContext + ParserError
     ParsedInput.swift - Codable output struct shared by all parsers
     ParserFactory.swift
     QueueProcessor.swift
@@ -49,9 +41,11 @@ slate/
   ViewModels/
     InputViewModel.swift (@Observable, @MainActor)
   Views/
-    FeedView.swift, InputBarView.swift, ResultsSheet.swift
-    AccountsSheet.swift, TransactionRowView.swift
-    TransferRowView.swift, PendingRowView.swift, ToastView.swift
+    FeedView.swift, InputBarView.swift
+    AccountsSheet.swift  - contains GlobalSheet + private AccountsContent
+    ResultsSheet.swift   - content-only view (no NavigationStack), used by GlobalSheet
+    TransactionRowView.swift, TransferRowView.swift
+    PendingRowView.swift, ToastView.swift
   Voice/
     SpeechRecognizer.swift + SpeechRecognizerProtocol.swift
 ```
@@ -65,11 +59,15 @@ slate/
 
 ### Parser / AI Layer
 
-Only `GroqInputParser` is active. `ParserFactory.make()` returns it. `ParsedInput` has 4 intents:
+Only `GroqInputParser` is active. `ParserFactory.make()` returns it. `ParsedInput` has these intents:
 - `.transaction` - regular income or expense
 - `.transfer` - between two accounts
 - `.createAccount` - natural language wallet creation
+- `.switchAccount` - change the active wallet
 - `.query` - history/balance queries
+- `.unknown` - non-financial input; app shows an error instead of logging anything
+
+`ParserContext` is built fresh on every `parse(input:context:)` call. It carries the user's current account names, currencies, and which wallet is active. `GroqInputParser.contextSection(_:)` appends this as a wallet list to the system prompt so the model resolves account references against real names.
 
 `TransactionCategory` has a custom `init(from:)` that falls back to `.other` for any unknown string the LLM returns.
 
@@ -78,19 +76,25 @@ Only `GroqInputParser` is active. `ParserFactory.make()` returns it. `ParsedInpu
 ### Wallet / Account Logic
 
 Every transaction attaches to an account via `accountID`. `InputViewModel` resolves the account in this order:
-1. If the user named a wallet in their input (`parsed.sourceAccount`) - fuzzy match (exact → substring → currency keyword)
+1. If the user named a wallet in their input (`parsed.sourceAccount`) - fuzzy match (exact -> substring -> currency keyword)
 2. Otherwise - the default account (`isDefault == true`)
 3. Fallback - first account in the list
 
-The first created account becomes default automatically. Tapping an account in `AccountsSheet` sets it as the new default.
+The first created account becomes default automatically. Active wallet can be switched by voice/text via the `switchAccount` intent.
+
+### UI Structure
+
+`ContentView` shows `FeedView` (today only - flat list, no tabs or period filters). `InputBarView` sits as a `safeAreaInset` at the bottom.
+
+One persistent `GlobalSheet` (in `AccountsSheet.swift`) handles both wallets and query results. It is presented via `isPresented: Binding(get: { vm.activeSheet != nil }, ...)` so the sheet stays open when `vm.activeSheet` switches between `.accounts` and `.results(QueryResult)`. Content swaps inside using `matchedGeometryEffect` + spring animation. `InputBarView` is embedded in `GlobalSheet` so all operations work from within the sheet.
+
+`InputViewModel.activeSheet: ActiveSheet?` drives the sheet:
+- `.accounts` - shows wallet list
+- `.results(QueryResult)` - shows query results
 
 ### Offline-First Rule
 
 Never set `Transaction.date` to the current time during queue flush. Always use `PendingInput.entryDate`.
-
-### UI Structure
-
-`ContentView` owns `selectedTab: FeedTab` (.expense/.income) and `selectedPeriod: FeedPeriod` (.day/.week/.month/.year), passed as bindings to `FeedView`. The tab switcher and period chips live inside the FeedView balance header. `InputBarView` sits as a `safeAreaInset` at the bottom.
 
 ### Language Support
 
