@@ -14,6 +14,15 @@ switch to dollar wallet
 
 Offline-first. If there's no connection, inputs queue locally and flush automatically when connectivity returns. The transaction's date is always when you entered it, never when it was parsed.
 
+## Screenshots
+
+| | | | |
+|:---:|:---:|:---:|:---:|
+| <img src="docs/screenshots/slate-1.png" width="180"> | <img src="docs/screenshots/slate-2.png" width="180"> | <img src="docs/screenshots/slate-3.png" width="180"> | <img src="docs/screenshots/slate-4.png" width="180"> |
+| <img src="docs/screenshots/slate-5.png" width="180"> | <img src="docs/screenshots/slate-6.png" width="180"> | <img src="docs/screenshots/slate-7.png" width="180"> | <img src="docs/screenshots/slate-8.png" width="180"> |
+| <img src="docs/screenshots/slate-9.png" width="180"> | <img src="docs/screenshots/slate-10.png" width="180"> | <img src="docs/screenshots/slate-11.png" width="180"> | <img src="docs/screenshots/slate-12.png" width="180"> |
+| <img src="docs/screenshots/slate-13.png" width="180"> | <img src="docs/screenshots/slate-14.png" width="180"> | <img src="docs/screenshots/slate-15.png" width="180"> | <img src="docs/screenshots/slate-16.png" width="180"> |
+
 ## Features
 
 - Natural language input - English, Russian, Turkmen
