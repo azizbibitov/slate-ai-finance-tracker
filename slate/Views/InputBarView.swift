@@ -3,6 +3,7 @@ import SwiftUI
 struct InputBarView: View {
     @Environment(InputViewModel.self) private var vm
 
+    @FocusState private var isFocused: Bool
     var body: some View {
         @Bindable var vm = vm
 
@@ -27,12 +28,15 @@ struct InputBarView: View {
                         vm.inputText = transcript
                     }
 
-                    TextField("Log a transaction or ask...", text: $vm.inputText, axis: .vertical)
+                    TextField("Log a transaction or ask...", text: $vm.inputText)
                         .textFieldStyle(.plain)
                         .font(.body)
-                        .lineLimit(1...4)
                         .autocorrectionDisabled()
                         .textInputAutocapitalization(.never)
+                        .focused($isFocused)
+                        .onChange(of: isFocused) { _, now in
+                            print("[FOCUS] isFocused = \(now)")
+                        }
                         .onSubmit { Task { await vm.submit() } }
 
                     SendButton(vm: vm)

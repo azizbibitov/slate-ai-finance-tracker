@@ -4,7 +4,7 @@ import AVFoundation
 @Observable
 @MainActor
 final class SpeechRecognizer: SpeechRecognizerProtocol {
-
+ 
     private(set) var state: RecordingState = .idle
 
     private var recognizer: SFSpeechRecognizer?
@@ -67,7 +67,7 @@ final class SpeechRecognizer: SpeechRecognizerProtocol {
         }
 
         do {
-            try await beginAudioSession(onPartialResult: onPartialResult)
+            try beginAudioSession(onPartialResult: onPartialResult)
             if case .starting = state { state = .recording }
         } catch {
             if case .starting = state { state = .unavailable("Could not start recording") }
@@ -92,7 +92,11 @@ final class SpeechRecognizer: SpeechRecognizerProtocol {
         return result
     }
 
-    private func beginAudioSession(onPartialResult: @escaping (String) -> Void) async throws {
+    // Runs entirely on the main actor. AVAudioEngine and the recognition request are
+    // non-Sendable and are owned here and torn down in stop() — keeping them in one
+    // isolation domain is what makes this data-race safe. There is no `await` in this
+    // body, so stop() cannot interleave mid-setup; no generation guard is needed here.
+    private func beginAudioSession(onPartialResult: @escaping (String) -> Void) throws {
         recognitionTask?.cancel()
         recognitionTask = nil
 
@@ -127,39 +131,28 @@ final class SpeechRecognizer: SpeechRecognizerProtocol {
             }
         }
 
-        let currentRecognitionRequest = request
-        try await Task.detached(priority: .userInitiated) { [generation] in
-            #if os(iOS)
-            let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.record, mode: .measurement, options: .duckOthers)
-            try session.setActive(true, options: .notifyOthersOnDeactivation)
-            #endif
+        #if os(iOS)
+        let session = AVAudioSession.sharedInstance()
+        try session.setCategory(.record, mode: .measurement, options: .duckOthers)
+        try session.setActive(true, options: .notifyOthersOnDeactivation)
+        #endif
 
-            let engine = AVAudioEngine()
-            let inputNode = engine.inputNode
-            let format = inputNode.outputFormat(forBus: 0)
-            let engineStartTime = Date()
-            inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in
-                // Skip first 300ms — hardware may deliver buffered audio from the previous session
-                guard Date().timeIntervalSince(engineStartTime) > 0.3 else { return }
-                currentRecognitionRequest.append(buffer)
-            }
-            engine.prepare()
-            try engine.start()
+        let engine = AVAudioEngine()
+        let inputNode = engine.inputNode
+        let format = inputNode.outputFormat(forBus: 0)
+        let engineStartTime = Date()
 
-            await MainActor.run {
-                // stop() may have been called while the engine was starting on the background thread.
-                // If so, audioEngine is still nil and stop() never cleaned it up — do it here instead.
-                guard self.sessionGeneration == generation else {
-                    engine.inputNode.removeTap(onBus: 0)
-                    engine.stop()
-                    #if os(iOS)
-                    try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
-                    #endif
-                    return
-                }
-                self.audioEngine = engine
-            }
-        }.value
+        // The tap block runs on CoreAudio's render thread, and append(_:) is designed to be
+        // called from exactly there. The compiler can't see that contract, so we assert it:
+        // the request is only appended-to here and ended in stop() — never mutated concurrently.
+        nonisolated(unsafe) let tapRequest = request
+        inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in
+            // Skip first 300ms — hardware may deliver buffered audio from the previous session
+            guard Date().timeIntervalSince(engineStartTime) > 0.3 else { return }
+            tapRequest.append(buffer)
+        }
+        engine.prepare()
+        try engine.start()
+        audioEngine = engine
     }
 }

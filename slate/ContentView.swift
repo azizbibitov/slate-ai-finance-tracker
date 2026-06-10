@@ -27,7 +27,10 @@ struct ContentView: View {
                 GlobalSheet()
             }
             .environment(vm)
-            .task { vm.setup(storage: SwiftDataStorageRepository(context: modelContext)) }
+            .task {
+                SampleData.seedIfNeeded(modelContext)
+                vm.setup(storage: SwiftDataStorageRepository(context: modelContext))
+            }
     }
 }
 
